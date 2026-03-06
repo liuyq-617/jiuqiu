@@ -1,4 +1,4 @@
-# CRM 知识库问答系统
+# 九丘知识库问答系统
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -7,7 +7,7 @@
 ## 系统架构
 
 ```
-CRM Markdown 文档
+ Markdown 文档
        │
        ▼
   文档解析 & 分块  (document_loader.py)
