@@ -1,0 +1,37 @@
+# ========== 环境与密钥 ==========
+.env
+.env.*
+!.env.example
+
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# ========== 数据文件（含业务数据，不应开源）==========
+data/embedding_cache.db
+data/chunks_preview.txt
+
+# ========== Milvus / Docker 持久化卷 ==========
+volumes/
+
+# ========== CRM 业务文档（敏感）==========
+*.md
+!README.md
+!docs/*.md
+
+# ========== IDE ==========
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ========== OS ==========
+.DS_Store
+Thumbs.db
