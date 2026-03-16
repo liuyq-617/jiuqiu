@@ -29,7 +29,7 @@ from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 from lark_oapi.ws.client import Client as _LarkWSClient
 from lark_oapi.ws.model import ClientConfig
 
-from app.config import FEISHU_APP_ID, FEISHU_APP_SECRET
+from app.config import FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_BOT_ENABLED
 from app.rag import answer_stream
 
 
@@ -58,6 +58,9 @@ FEISHU_API_BASE = "https://open.feishu.cn/open-apis"
 
 # tenant_access_token 缓存
 _token_cache: dict = {"token": "", "expire_at": 0.0}
+
+# 机器人自身 open_id 缓存
+_bot_open_id: str = ""
 
 # Card Kit 流式更新节流间隔（飞书元素内容接口限制约 10 次/秒）
 _UPDATE_INTERVAL = 0.15  # 秒
@@ -92,6 +95,22 @@ def _get_token() -> str:
     _token_cache["expire_at"] = now + data.get("expire", 7200) - 300
     logger.info("[feishu] tenant_access_token 已刷新")
     return _token_cache["token"]
+
+
+def _get_bot_open_id() -> str:
+    """获取机器人自身的 open_id（带缓存，仅首次调用时请求 API）"""
+    global _bot_open_id
+    if _bot_open_id:
+        return _bot_open_id
+    url = f"{FEISHU_API_BASE}/bot/v3/info"
+    with httpx.Client(timeout=10) as client:
+        resp = client.get(url, headers=_headers())
+        data = resp.json()
+    if data.get("code") != 0:
+        raise RuntimeError(f"获取机器人信息失败: {data}")
+    _bot_open_id = data["bot"]["open_id"]
+    logger.info(f"[feishu] 机器人 open_id={_bot_open_id}")
+    return _bot_open_id
 
 
 def _headers() -> dict:
@@ -355,6 +374,25 @@ def _on_message(data: P2ImMessageReceiveV1) -> None:
         logger.debug(f"[feishu] 忽略非文本消息 type={msg_type}")
         return
 
+    # 群聊中检查是否被 @ 机器人本身，否则忽略
+    if chat_type == "group":
+        mentions = msg.mentions if hasattr(msg, "mentions") else []
+        if not mentions:
+            logger.debug(f"[feishu] 群聊消息未 @ 任何人，忽略 message_id={message_id}")
+            return
+        try:
+            bot_open_id = _get_bot_open_id()
+            mentioned_ids = [
+                (m.id.open_id if hasattr(m, "id") and m.id else "")
+                for m in mentions
+            ]
+            if bot_open_id not in mentioned_ids:
+                logger.debug(f"[feishu] 群聊消息未 @ 机器人，忽略 message_id={message_id}")
+                return
+        except Exception as e:
+            logger.warning(f"[feishu] 无法获取机器人 open_id，跳过 @ 检查: {e}")
+        logger.debug(f"[feishu] 群聊消息已 @ 机器人，处理中")
+
     # 解析 content（飞书文本消息 content 是 JSON 字符串：{"text":"..."}）
     try:
         content_obj = json.loads(msg.content)
@@ -385,6 +423,10 @@ def start_ws_client() -> None:
     由 FastAPI lifespan 在应用启动时调用。
     """
     global _ws_thread
+
+    if not FEISHU_BOT_ENABLED:
+        logger.info("[feishu] 飞书机器人已禁用（FEISHU_BOT_ENABLED=false）")
+        return
 
     if not FEISHU_APP_ID or not FEISHU_APP_SECRET:
         logger.warning(
