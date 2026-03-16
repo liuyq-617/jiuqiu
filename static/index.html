@@ -280,6 +280,42 @@
     .fb-btn.active-down { background: #fee2e2; border-color: #ef4444; color: #dc2626; }
     .fb-label { font-size: 12px; color: var(--muted); }
 
+    /* ===== 手动评分面板 ===== */
+    .manual-score-panel {
+      margin-top: 10px; padding: 10px 12px;
+      background: #f8fafc; border: 1px solid var(--border);
+      border-radius: 8px; font-size: 13px;
+    }
+    .manual-score-panel .ms-title {
+      font-weight: 600; margin-bottom: 8px; color: #334155;
+    }
+    .ms-row {
+      display: flex; align-items: center; margin-bottom: 6px; gap: 8px;
+    }
+    .ms-label { width: 46px; color: var(--muted); flex-shrink: 0; }
+    .stars { display: flex; gap: 3px; }
+    .star {
+      font-size: 18px; cursor: pointer; color: #cbd5e1; line-height: 1;
+      transition: color .1s; user-select: none;
+    }
+    .star.lit { color: #f59e0b; }
+    .star:hover, .star.hover { color: #f59e0b; }
+    .ms-val { font-size: 12px; color: var(--muted); width: 20px; }
+    .ms-comment {
+      width: 100%; margin-top: 6px; padding: 5px 8px;
+      border: 1px solid var(--border); border-radius: 5px;
+      font-size: 12px; resize: none; font-family: inherit;
+      color: #334155;
+    }
+    .ms-submit {
+      margin-top: 8px; padding: 5px 14px; font-size: 13px;
+      background: var(--primary); color: #fff; border: none;
+      border-radius: 6px; cursor: pointer; transition: opacity .15s;
+    }
+    .ms-submit:hover { opacity: .85; }
+    .ms-submit:disabled { opacity: .5; cursor: default; }
+    .ms-done { font-size: 12px; color: #16a34a; margin-top: 6px; }
+
     /* ===== Quality panel ===== */
     .score-row {
       display: flex; align-items: center;
@@ -351,6 +387,9 @@
       <h3>知识库管理</h3>
       <button id="rebuild-btn" onclick="rebuildIndex()">🔄 重建索引</button>
       <div id="rebuild-msg"></div>
+      <button id="mcp-btn" onclick="window.location.href='/static/mcp.html'" style="margin-top: 10px; width: 100%; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; color: var(--muted); transition: all .15s;">
+        🔌 MCP 数据源
+      </button>
     </div>
 
     <div class="card" id="quality-card">
@@ -361,6 +400,7 @@
       <div class="stat-divider"></div>
       <div class="stat-row"><span>平均响应</span><span id="q-ms">—</span></div>
       <div class="stat-divider"></div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0 2px">AI 自动评分均值</div>
       <div class="score-row">
         <span>相关性</span>
         <div class="score-bar"><div class="score-fill" id="q-rel-bar" style="width:0%"></div></div>
@@ -372,9 +412,26 @@
         <span class="score-val" id="q-comp">—</span>
       </div>
       <div class="score-row">
-        <span>准确性</span>
+        <span>准确性(AI)</span>
         <div class="score-bar"><div class="score-fill" id="q-acc-bar" style="width:0%"></div></div>
         <span class="score-val" id="q-acc">—</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0 2px">手动评分均值</div>
+      <div class="score-row">
+        <span>相关性</span>
+        <div class="score-bar"><div class="score-fill" id="m-rel-bar" style="width:0%;background:#f59e0b"></div></div>
+        <span class="score-val" id="m-rel" style="color:#f59e0b">—</span>
+      </div>
+      <div class="score-row">
+        <span>完整性</span>
+        <div class="score-bar"><div class="score-fill" id="m-comp-bar" style="width:0%;background:#f59e0b"></div></div>
+        <span class="score-val" id="m-comp" style="color:#f59e0b">—</span>
+      </div>
+      <div class="score-row">
+        <span>准确性</span>
+        <div class="score-bar"><div class="score-fill" id="m-acc-bar" style="width:0%;background:#f59e0b"></div></div>
+        <span class="score-val" id="m-acc" style="color:#f59e0b">—</span>
       </div>
     </div>
   </div>
@@ -425,13 +482,16 @@
         d.thumbs_up_rate !== null ? (d.thumbs_up_rate * 100).toFixed(0) + '%' : '—';
       document.getElementById('q-ms').textContent =
         d.avg_response_ms !== null ? (d.avg_response_ms / 1000).toFixed(1) + 's' : '—';
-      const setScore = (barId, valId, val) => {
+      const setScore = (barId, valId, val, color) => {
         document.getElementById(valId).textContent = val !== null ? val.toFixed(1) : '—';
         document.getElementById(barId).style.width = val !== null ? ((val - 1) / 4 * 100).toFixed(0) + '%' : '0%';
       };
       setScore('q-rel-bar',  'q-rel',  d.avg_llm_relevance);
       setScore('q-comp-bar', 'q-comp', d.avg_llm_completeness);
       setScore('q-acc-bar',  'q-acc',  d.avg_llm_accuracy);
+      setScore('m-rel-bar',  'm-rel',  d.avg_manual_relevance);
+      setScore('m-comp-bar', 'm-comp', d.avg_manual_completeness);
+      setScore('m-acc-bar',  'm-acc',  d.avg_manual_accuracy);
     } catch (e) {
       console.warn('quality stats failed:', e);
     }
@@ -626,9 +686,10 @@
               }
 
             } else if (payload.type === 'answer_id') {
-              // 收到 answer_id，带出赞/踩按钮
+              // 收到 answer_id，带出赞/踩 + 手动打分面板
               currentAnswerId = payload.id;
               if (botWrapper && currentAnswerId) {
+                // --- 赞/踩快捷按钮 ---
                 const feedbackBar = document.createElement('div');
                 feedbackBar.className = 'feedback-bar';
                 feedbackBar.innerHTML = `
@@ -637,6 +698,24 @@
                   <button class="fb-btn" onclick="submitFeedback('${currentAnswerId}', -1, this)">👎 无帮助</button>
                 `;
                 botWrapper.appendChild(feedbackBar);
+
+                // --- 手动打分面板 ---
+                const panel = document.createElement('div');
+                panel.className = 'manual-score-panel';
+                panel.id = 'manual-panel-' + currentAnswerId;
+                panel.innerHTML = `
+                  <div class="ms-title">📝 手动打分（1~5 颗星）</div>
+                  ${buildStarRow('rel',  '相关性', currentAnswerId)}
+                  ${buildStarRow('comp', '完整性', currentAnswerId)}
+                  ${buildStarRow('acc',  '准确性', currentAnswerId)}
+                  <textarea class="ms-comment" id="ms-comment-${currentAnswerId}" rows="2" placeholder="评语（可选）"></textarea>
+                  <br>
+                  <button class="ms-submit" onclick="submitManualScore('${currentAnswerId}')">提交打分</button>
+                  <span class="ms-done" id="ms-done-${currentAnswerId}" style="display:none">✅ 已提交</span>
+                `;
+                botWrapper.appendChild(panel);
+                // 绑定星星悬停和点击
+                bindStars(currentAnswerId);
               }
 
             } else if (payload.type === 'done') {
@@ -668,6 +747,88 @@
       sendBtn.disabled = false;
       sendBtn.textContent = '发送';
       messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+  }
+
+  // ===== 手动打分星星工具函数 =====
+  function buildStarRow(dim, label, aid) {
+    const stars = [1,2,3,4,5].map(n =>
+      `<span class="star" data-aid="${aid}" data-dim="${dim}" data-val="${n}">★</span>`
+    ).join('');
+    return `<div class="ms-row">
+      <span class="ms-label">${label}</span>
+      <div class="stars" id="stars-${dim}-${aid}">${stars}</div>
+      <span class="ms-val" id="ms-val-${dim}-${aid}">-</span>
+    </div>`;
+  }
+
+  function bindStars(aid) {
+    ['rel','comp','acc'].forEach(dim => {
+      const container = document.getElementById(`stars-${dim}-${aid}`);
+      if (!container) return;
+      const stars = container.querySelectorAll('.star');
+      stars.forEach(star => {
+        star.addEventListener('mouseenter', () => {
+          const v = +star.dataset.val;
+          stars.forEach(s => s.classList.toggle('hover', +s.dataset.val <= v));
+        });
+        star.addEventListener('mouseleave', () => {
+          const selected = container.querySelector('.star.lit');
+          const sel = selected ? +selected.dataset.val : 0;
+          stars.forEach(s => {
+            s.classList.remove('hover');
+            s.classList.toggle('lit', +s.dataset.val <= sel);
+          });
+        });
+        star.addEventListener('click', () => {
+          const v = +star.dataset.val;
+          stars.forEach(s => s.classList.toggle('lit', +s.dataset.val <= v));
+          document.getElementById(`ms-val-${dim}-${aid}`).textContent = v;
+        });
+      });
+    });
+  }
+
+  async function submitManualScore(aid) {
+    const getDimVal = dim => {
+      const lit = document.querySelectorAll(`#stars-${dim}-${aid} .star.lit`);
+      return lit.length;
+    };
+    const rel  = getDimVal('rel');
+    const comp = getDimVal('comp');
+    const acc  = getDimVal('acc');
+    if (!rel || !comp || !acc) {
+      alert('请为三个维度都打分后再提交');
+      return;
+    }
+    const comment = document.getElementById(`ms-comment-${aid}`)?.value || '';
+    const btn = document.querySelector(`#manual-panel-${aid} .ms-submit`);
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          answer_id: aid,
+          manual_relevance: rel,
+          manual_completeness: comp,
+          manual_accuracy: acc,
+          manual_comment: comment,
+          trigger_judge: false,
+        }),
+      });
+      if (res.ok) {
+        const doneEl = document.getElementById(`ms-done-${aid}`);
+        if (doneEl) doneEl.style.display = 'inline';
+        if (btn) btn.style.display = 'none';
+        setTimeout(loadQualityStats, 1500);
+      } else {
+        alert('提交失败，请重试');
+        if (btn) btn.disabled = false;
+      }
+    } catch(e) {
+      alert('网络错误：' + e.message);
+      if (btn) btn.disabled = false;
     }
   }
 
