@@ -12,9 +12,11 @@ from typing import List, Dict, Any, Iterator, Optional, Tuple
 import httpx
 
 from app.config import (
-    CHAT_API_KEY, CHAT_BASE_URL, OPENAI_CHAT_MODEL, TOP_K, CHAT_API_MODE
+    CHAT_API_KEY, CHAT_BASE_URL, OPENAI_CHAT_MODEL, TOP_K, CHAT_API_MODE,
+    ADVANCED_RAG_ENABLED,
 )
-from app.vector_store import search, get_aggregate_stats, query_by_metadata, get_distinct_values
+from app.vector_store import search, get_aggregate_stats, query_by_metadata, get_distinct_values, get_field_activity_counts
+from app.advanced_rag import advanced_retrieve
 
 logger = logging.getLogger("crm_rag")
 
@@ -204,6 +206,144 @@ def extract_filters(question: str) -> Dict[str, str]:
     return {"owner": owner, "date_from": date_from, "date_to": date_to}
 
 
+# ========== 多人评价/排名问题检测 ==========
+# 此类问题需要逐人拉取明细活动记录，而非走聚合统计
+_EVALUATION_PATTERNS = [
+    r'(所有|全部|全体|每个|各个|所有的).{0,6}(销售|负责人|同事|员工).{0,10}(评价|排名|排行|考核|绩效|表现|工作|业绩)',
+    r'(评价|排名|排行|考核|绩效|表现|业绩).{0,10}(所有|全部|全体|每个|各个).{0,6}(销售|负责人|同事|员工)',
+    r'(销售|负责人|销售人员).{0,6}(排名|排行榜|绩效排名|评分|评级|综合.{0,4}评)',
+    r'谁.{0,6}(最好|最差|最积极|最努力|排[第名]|第一|倒数)',
+    r'对(所有|每个|各个|全部).{0,6}(销售|负责人).{0,10}(做|给|进行).{0,6}(评价|评估|分析|考核)',
+]
+_EVALUATION_RE = re.compile('|'.join(_EVALUATION_PATTERNS))
+
+
+def _is_evaluation_question(question: str) -> bool:
+    """判断是否为需要逐人拉取明细的多人评价/排名问题"""
+    return bool(_EVALUATION_RE.search(question))
+
+
+def _build_evaluation_context(question: str, per_owner_limit: int = 60) -> tuple:
+    """
+    为多人评价问题构建上下文：遍历所有负责人，分别拉取活动明细。
+    返回 (context_str, sources)
+    """
+    owners = _get_owners()
+    if not owners:
+        return "（知识库中未找到任何负责人记录）", []
+
+    logger.info(f"[evaluation] 开始逐一拉取 {len(owners)} 位负责人的活动记录")
+    parts = []
+    sources = set()
+
+    for owner in owners:
+        hits = query_by_metadata(owner=owner, limit=per_owner_limit)
+        logger.info(f"[evaluation] {owner}: 共 {len(hits)} 条记录")
+        if not hits:
+            parts.append(f"\n### 负责人：{owner}\n（无活动记录）\n")
+            continue
+
+        sources.update(h["source"] for h in hits)
+        # 按日期排序（新 → 旧）
+        hits_sorted = sorted(hits, key=lambda h: h.get("date") or "", reverse=True)
+        records = []
+        for h in hits_sorted:
+            meta = ""
+            if h.get("date"):
+                meta += f"[{h['date']}] "
+            if h.get("company"):
+                meta += f"客户:{h['company']}  "
+            records.append(f"{meta}{h['text']}")
+        parts.append(
+            f"\n### 负责人：{owner}（共 {len(hits)} 条活动记录）\n"
+            + "\n".join(records)
+        )
+
+    context = (
+        "【各销售人员活动明细（逐人完整记录）】\n"
+        "以下为知识库中所有负责人的跟进活动详情，请基于此进行综合评价与排名。\n"
+        + "".join(parts)
+    )
+    return context, list(sources)
+
+
+# ========== 活跃度/数量排名问题检测 ==========
+# 检测"前N客户/负责人 按活动记录数量排名"类问题
+_RANKING_PATTERNS = [
+    r'活跃.{0,6}前\s*(\d+|[一二三四五六七八九十]+)',
+    r'前\s*(\d+|[一二三四五六七八九十]+).{0,10}(活跃|活动|跟进|记录)',
+    r'(活动|跟进|拜访).{0,6}(记录|次数).{0,10}(前|最多|排名|排行)',
+    r'(最|更)活跃.{0,8}(客户|公司|负责人|销售)',
+    r'(客户|公司|负责人|销售).{0,10}(活跃|活动次数|跟进次数).{0,6}(排[名行]|前\d)',
+    r'(活动|记录).{0,4}(数量|次数).{0,4}(排[名行]|前\d|最多)',
+    r'跟进(次数|记录数).{0,6}(前|最多|排)',
+    r'(哪[些个家]).{0,6}客户.{0,10}(最|更)?(多|频繁|活跃)',
+]
+_RANKING_RE = re.compile('|'.join(_RANKING_PATTERNS))
+
+# 识别排名字段：客户 or 负责人
+_RANKING_FIELD_OWNER_RE = re.compile(r'(负责人|销售|员工|同事)')
+_RANKING_FIELD_COMPANY_RE = re.compile(r'(客户|公司|企业)')
+
+
+def _is_ranking_question(question: str) -> bool:
+    """判断是否为按活动数量排名的问题"""
+    return bool(_RANKING_RE.search(question))
+
+
+def _extract_ranking_params(question: str) -> Dict[str, Any]:
+    """
+    从问题中提取排名参数：
+    - field: 'company' 或 'owner'
+    - top_n: 数字，默认 5
+    """
+    # 判断字段
+    if _RANKING_FIELD_OWNER_RE.search(question) and not _RANKING_FIELD_COMPANY_RE.search(question):
+        field = "owner"
+    else:
+        field = "company"
+
+    # 中文数字映射
+    _CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+               "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+    # 提取 N（支持阿拉伯数字和中文数字）
+    n_match = re.search(r'前\s*(\d+|[一二三四五六七八九十]+)', question)
+    if n_match:
+        raw = n_match.group(1)
+        if raw.isdigit():
+            top_n = int(raw)
+        else:
+            top_n = _CN_NUM.get(raw, 5)
+    else:
+        top_n = 5
+
+    return {"field": field, "top_n": top_n}
+
+
+def _build_ranking_context(question: str) -> tuple:
+    """为活跃度排名问题构建上下文：统计各实体的活动记录数量并排序"""
+    params = _extract_ranking_params(question)
+    field = params["field"]
+    top_n = params["top_n"]
+
+    counts = get_field_activity_counts(field, top_n=top_n * 3)  # 多拉一些做筛选余量
+
+    if not counts:
+        return "（知识库中未找到相关记录）", []
+
+    field_label = "客户" if field == "company" else "负责人"
+    lines = [
+        f"【{field_label}活跃度排名（按活动记录数量，共统计 {len(counts)} 个{field_label}）】",
+        f"以下为活动记录数量最多的前 {top_n} 个{field_label}：\n",
+    ]
+    for rank, item in enumerate(counts[:top_n], 1):
+        lines.append(f"第 {rank} 名：{item['value']}（活动记录数：{item['count']} 条）")
+
+    context = "\n".join(lines)
+    return context, ["crm_activities_recent.md"]
+
+
 # ========== 聚合问题关键词检测 ==========
 # 聚合型问题使用正则匹配，兼容量词变体（个/家/位/条 等）
 _AGGREGATE_PATTERNS = [
@@ -226,6 +366,9 @@ def _is_aggregate_question(question: str) -> bool:
     若问题中含有具体负责人名，优先识别为元数据过滤而非聚合。
     """
     if not _AGGREGATE_RE.search(question):
+        return False
+    # 含业务分析/进展语义时，不走聚合清单路由
+    if re.search(r'进展|跟进|推进|分析|总结|情况|动态|风险|机会|策略|建议|成单|转化|原因', question):
         return False
     # 如果问题里有具体人名，走元数据过滤而非聚合
     if _extract_owner(question):
@@ -251,14 +394,22 @@ def _build_aggregate_context(question: str) -> tuple:
 
 # ========== System Prompt ==========
 SYSTEM_PROMPT = """你是一个专业的 CRM 业务助手，拥有公司近期客户跟进活动的完整知识库。
-你的任务是根据提供的 CRM 活动记录，准确、简洁地回答用户问题。
+你的任务是根据提供的 CRM 活动记录，准确、深入地回答用户问题。
 
 回答规范：
-1. 直接基于检索到的上下文内容回答，不要编造信息
-2. 如果上下文中没有相关信息，诚实告知"知识库中未找到相关记录"
-3. 涉及具体客户、日期、负责人时，尽量精确引用原文
-4. 回答使用中文，结构清晰
-5. 如有多个相关记录，用编号列举
+1. **信息提取**：直接基于检索到的上下文内容回答，不要编造不存在的信息
+2. **推理分析**：可以基于活动记录进行合理的分析、总结和评价
+   - 例如：根据跟进频率、客户数量、成交情况等推断工作表现
+   - 例如：根据活动内容分析工作风格、优势和不足
+3. **评价维度**：当用户要求用特定词汇或维度评价时，基于实际记录灵活运用
+   - 理解用户的评价语境（如网络用语、俚语等）
+   - 结合活动记录的客观数据给出合理评价
+4. **缺失信息**：仅当完全没有相关记录时，才告知"知识库中未找到相关记录"
+   - 如果有活动记录但缺少某些具体信息（如绩效指标），说明"记录中未包含该信息，但可基于活动情况分析..."
+5. **表达方式**：
+   - 涉及具体客户、日期、负责人时，精确引用原文
+   - 进行分析评价时，清晰说明依据和推理过程
+   - 回答使用中文，结构清晰，如有多个相关记录用编号列举
 """
 
 
@@ -303,7 +454,17 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
     logger.info(f"[answer] 问题: {question}")
 
     # --- 路由优先级判断 ---
-    if _is_aggregate_question(question):
+    if _is_ranking_question(question):
+        # 活跃度/数量排名类：统计各实体activity记录数
+        logger.info("[answer] 检测到活跃度排名问题，统计活动记录数量")
+        context, sources = _build_ranking_context(question)
+        hits = []
+    elif _is_evaluation_question(question):
+        # 多人评价排名类：逐人拉取活动明细
+        logger.info("[answer] 检测到多人评价/排名问题，逐人拉取活动明细")
+        context, sources = _build_evaluation_context(question)
+        hits = []
+    elif _is_aggregate_question(question):
         # 全量统计类：多少客户/负责人
         logger.info("[answer] 检测到聚合统计问题，使用全量元数据查询")
         context, sources = _build_aggregate_context(question)
@@ -335,9 +496,13 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
                 context = build_context(hits)
             sources = list({h["source"] for h in hits})
         else:
-            # 纯语义相似度检索
-            hits = search(question, top_k=top_k)
-            logger.info(f"[answer] 语义检索到 {len(hits)} 条相关片段")
+            # 语义检索（普通 or Advanced RAG）
+            if ADVANCED_RAG_ENABLED:
+                hits = advanced_retrieve(question, top_k=top_k)
+                logger.info(f"[answer] Advanced RAG 检索到 {len(hits)} 条相关片段")
+            else:
+                hits = search(question, top_k=top_k)
+                logger.info(f"[answer] 语义检索到 {len(hits)} 条相关片段")
             context = build_context(hits)
             sources = list({h["source"] for h in hits})
 
@@ -385,7 +550,26 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
     logger.info(f"[stream] 问题: {question}")
 
     # --- 路由判断 ---
-    if _is_aggregate_question(question):
+    if _is_ranking_question(question):
+        logger.info("[stream] 检测到活跃度排名问题，统计活动记录数量")
+        try:
+            context, sources = _build_ranking_context(question)
+            hits = []
+        except Exception as e:
+            logger.error(f"[stream] 排名查询失败: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'content': f'排名查询失败: {e}'}, ensure_ascii=False)}\n\n"
+            return
+    elif _is_evaluation_question(question):
+        # 多人评价排名类：逐人拉取活动明细
+        logger.info("[stream] 检测到多人评价/排名问题，逐人拉取活动明细")
+        try:
+            context, sources = _build_evaluation_context(question)
+            hits = []
+        except Exception as e:
+            logger.error(f"[stream] 多人评价查询失败: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'content': f'评价查询失败: {e}'}, ensure_ascii=False)}\n\n"
+            return
+    elif _is_aggregate_question(question):
         logger.info("[stream] 检测到聚合统计问题，使用全量元数据查询")
         try:
             context, sources = _build_aggregate_context(question)
@@ -424,14 +608,18 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
                 context = build_context(hits)
             sources = list({h["source"] for h in hits})
         else:
-            # --- 纯向量检索 ---
+            # --- 语义检索（普通 or Advanced RAG）---
             try:
-                hits = search(question, top_k=top_k)
+                if ADVANCED_RAG_ENABLED:
+                    hits = advanced_retrieve(question, top_k=top_k)
+                    logger.info(f"[stream] Advanced RAG 检索到 {len(hits)} 条相关片段")
+                else:
+                    hits = search(question, top_k=top_k)
+                    logger.info(f"[stream] 语义检索到 {len(hits)} 条相关片段")
             except Exception as e:
-                logger.error(f"[stream] 向量检索失败: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'content': f'向量检索失败: {e}'}, ensure_ascii=False)}\n\n"
+                logger.error(f"[stream] 检索失败: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'content': f'检索失败: {e}'}, ensure_ascii=False)}\n\n"
                 return
-            logger.info(f"[stream] 语义检索到 {len(hits)} 条相关片段")
             sources = list({h["source"] for h in hits})
             context = build_context(hits)
 

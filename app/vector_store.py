@@ -308,6 +308,47 @@ def get_aggregate_stats() -> Dict[str, Any]:
     }
 
 
+def get_field_activity_counts(field: str, top_n: int = 0) -> List[Dict[str, Any]]:
+    """
+    统计每个字段值的活动记录数量，返回按数量降序排列的列表。
+    适用于 "活跃度前N客户" 等排名问题。
+
+    field  : 要统计的元数据字段，通常为 'company' 或 'owner'
+    top_n  : 返回前 N 条，0 表示返回全部
+    返回：[{'value': str, 'count': int}, ...]，已按 count 降序
+    """
+    connect_milvus()
+    col = ensure_collection()
+    total = col.num_entities
+    if total == 0:
+        return []
+
+    PAGE = 1000
+    count_map: Dict[str, int] = {}
+    offset = 0
+
+    while offset < total:
+        rows = col.query(
+            expr=f"{field} != ''",
+            output_fields=[field],
+            limit=PAGE,
+            offset=offset,
+        )
+        if not rows:
+            break
+        for row in rows:
+            val = row.get(field, "").strip()
+            if val:
+                count_map[val] = count_map.get(val, 0) + 1
+        offset += PAGE
+
+    sorted_list = sorted(count_map.items(), key=lambda x: x[1], reverse=True)
+    result = [{"value": v, "count": c} for v, c in sorted_list]
+    if top_n > 0:
+        result = result[:top_n]
+    return result
+
+
 def query_by_metadata(
     owner: str = "",
     date_from: str = "",
