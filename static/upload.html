@@ -16,7 +16,13 @@
       --text: #1e293b;
       --muted: #64748b;
       --success: #22c55e;
+      --success-bg: #d1fae5;
+      --success-text: #065f46;
       --error: #ef4444;
+      --error-bg: #fee2e2;
+      --error-text: #991b1b;
+      --warn-bg: #fef3c7;
+      --warn-text: #92400e;
       --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.04);
       --radius: 12px;
     }
@@ -30,432 +36,1753 @@
       padding: 24px;
     }
 
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-    }
+    .container { max-width: 900px; margin: 0 auto; }
 
+    /* ── Header ── */
     header {
       background: var(--card);
       border-radius: var(--radius);
-      padding: 24px;
+      padding: 20px 24px;
       margin-bottom: 24px;
       box-shadow: var(--shadow);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
     }
+    header h1 { font-size: 22px; }
+    header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .nav-link { color: var(--primary); text-decoration: none; font-size: 13px; }
+    .nav-link:hover { text-decoration: underline; }
 
-    h1 {
-      font-size: 24px;
-      margin-bottom: 8px;
-    }
-
-    .subtitle {
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .nav-link {
-      display: inline-block;
-      margin-top: 12px;
-      color: var(--primary);
-      text-decoration: none;
-      font-size: 14px;
-    }
-
-    .nav-link:hover {
-      text-decoration: underline;
-    }
-
-    .upload-card {
+    /* ── Stepper ── */
+    .stepper {
+      display: flex;
+      align-items: center;
       background: var(--card);
       border-radius: var(--radius);
-      padding: 32px;
+      padding: 20px 28px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+      gap: 0;
+    }
+    .step {
+      display: flex;
+      align-items: center;
+      flex: 1;
+      gap: 10px;
+      position: relative;
+    }
+    .step:not(:last-child)::after {
+      content: '';
+      flex: 1;
+      height: 2px;
+      background: var(--border);
+      margin: 0 8px;
+      border-radius: 1px;
+      transition: background .3s;
+    }
+    .step.done:not(:last-child)::after { background: var(--primary); }
+    .step-num {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 600;
+      color: var(--muted);
+      background: white;
+      flex-shrink: 0;
+      transition: all .3s;
+    }
+    .step.active .step-num {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: white;
+    }
+    .step.done .step-num {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: white;
+    }
+    .step-label { font-size: 13px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+    .step.active .step-label, .step.done .step-label { color: var(--text); }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 28px;
       box-shadow: var(--shadow);
       margin-bottom: 24px;
     }
+    .card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
 
+    /* ── Upload Zone ── */
     .upload-zone {
       border: 2px dashed var(--border);
       border-radius: var(--radius);
       padding: 48px 24px;
       text-align: center;
       cursor: pointer;
-      transition: all 0.3s;
-      margin-bottom: 24px;
+      transition: all .25s;
     }
-
-    .upload-zone:hover {
-      border-color: var(--primary);
-      background: #f8fafc;
-    }
-
-    .upload-zone.dragover {
+    .upload-zone:hover, .upload-zone.dragover {
       border-color: var(--primary);
       background: #eff6ff;
     }
+    .upload-icon { font-size: 48px; margin-bottom: 12px; }
+    .upload-text { font-size: 15px; font-weight: 500; margin-bottom: 6px; }
+    .upload-hint { font-size: 12px; color: var(--muted); }
+    #file-input { display: none; }
 
-    .upload-icon {
-      font-size: 48px;
-      margin-bottom: 16px;
-    }
-
-    .upload-text {
-      font-size: 16px;
-      margin-bottom: 8px;
-    }
-
-    .upload-hint {
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    #file-input {
-      display: none;
-    }
-
-    .file-list {
-      margin-top: 24px;
-    }
-
-    .file-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 16px;
-      border: 1px solid var(--border);
+    /* ── Buttons ── */
+    button {
+      padding: 10px 20px;
+      border: none;
       border-radius: 8px;
-      margin-bottom: 8px;
-      background: #f8fafc;
-    }
-
-    .file-info {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .file-name {
       font-size: 14px;
       font-weight: 500;
+      cursor: pointer;
+      transition: all .2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-secondary:hover:not(:disabled) { background: #cbd5e1; }
+    .btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-outline {
+      background: transparent;
+      border: 1.5px solid var(--primary);
+      color: var(--primary);
+    }
+    .btn-outline:hover:not(:disabled) { background: #eff6ff; }
+    .btn-outline:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-sm { padding: 6px 14px; font-size: 13px; }
 
-    .file-size {
+    /* ── Alerts ── */
+    .msg {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-top: 14px;
+    }
+    .msg.success { background: var(--success-bg); color: var(--success-text); }
+    .msg.error   { background: var(--error-bg);   color: var(--error-text); }
+    .msg.warn    { background: var(--warn-bg);     color: var(--warn-text); }
+    .msg.info    { background: #eff6ff;            color: #1e40af; }
+
+    /* ── Content Preview ── */
+    .preview-box {
+      font-family: 'Menlo', 'Consolas', monospace;
       font-size: 12px;
-      color: var(--muted);
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      max-height: 320px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
     }
 
-    .file-status {
-      font-size: 12px;
-      padding: 4px 8px;
-      border-radius: 4px;
+    /* ── Pattern Row ── */
+    .pattern-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      flex-wrap: wrap;
     }
-
-    .file-status.pending {
-      background: #fef3c7;
-      color: #92400e;
+    .pattern-row input[type="text"] {
+      flex: 1;
+      min-width: 200px;
+      padding: 9px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: 'Menlo', monospace;
+      outline: none;
+      transition: border-color .2s;
     }
+    .pattern-row input:focus { border-color: var(--primary); }
+    .pattern-row input.invalid { border-color: var(--error); }
 
-    .file-status.uploading {
+    /* ── Chunk List ── */
+    .chunk-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+    .chunk-item {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .chunk-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 14px;
+      background: #f8fafc;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+    }
+    .chunk-header:hover { background: #f1f5f9; }
+    .chunk-badge {
       background: #dbeafe;
       color: #1e40af;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
     }
-
-    .file-status.success {
-      background: #d1fae5;
-      color: #065f46;
+    .chunk-body {
+      padding: 12px 14px;
+      font-family: 'Menlo', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+      display: none;
+      border-top: 1px solid var(--border);
+      background: white;
     }
+    .chunk-body.open { display: block; }
 
-    .file-status.error {
-      background: #fee2e2;
-      color: #991b1b;
+    /* ── Metadata dynamic rows ── */
+    .meta-field-row {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      background: #fff;
+      position: relative;
     }
-
-    .remove-btn {
+    .meta-field-row.recommended { border-left: 3px solid var(--primary); }
+    .meta-field-row-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .meta-field-name {
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .meta-field-key {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: 'Menlo', monospace;
+      background: #f1f5f9;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .meta-reason {
+      font-size: 12px;
+      color: var(--muted);
+      flex: 1;
+      font-style: italic;
+    }
+    .btn-remove-field {
       background: none;
       border: none;
       color: var(--muted);
       cursor: pointer;
-      font-size: 18px;
-      padding: 4px 8px;
+      padding: 2px 6px;
+      font-size: 16px;
+      border-radius: 4px;
+      line-height: 1;
     }
-
-    .remove-btn:hover {
-      color: var(--error);
-    }
-
-    .actions {
-      display: flex;
-      gap: 12px;
-      margin-top: 24px;
-    }
-
-    button {
-      padding: 12px 24px;
-      border: none;
+    .btn-remove-field:hover { background: var(--error-bg); color: var(--error); }
+    .meta-field-body { display: flex; flex-direction: column; gap: 8px; }
+    /* ── 正则多块实时预览 ── */
+    .regex-multi-preview {
+      border: 1px solid var(--border);
       border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-primary {
-      background: var(--primary);
-      color: white;
-    }
-
-    .btn-primary:hover:not(:disabled) {
-      background: var(--primary-hover);
-    }
-
-    .btn-primary:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .btn-secondary {
-      background: var(--border);
-      color: var(--text);
-    }
-
-    .btn-secondary:hover {
-      background: #cbd5e1;
-    }
-
-    .message {
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin-top: 16px;
-      font-size: 14px;
-    }
-
-    .message.success {
-      background: #d1fae5;
-      color: #065f46;
-      border: 1px solid #a7f3d0;
-    }
-
-    .message.error {
-      background: #fee2e2;
-      color: #991b1b;
-      border: 1px solid #fecaca;
-    }
-
-    .progress-bar {
-      width: 100%;
-      height: 4px;
-      background: var(--border);
-      border-radius: 2px;
       overflow: hidden;
+      font-size: 12px;
+      background: var(--card);
+    }
+    .regex-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 10px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .regex-match-rate { font-size: 11px; }
+    .regex-match-rate.all-match  { color: var(--success); }
+    .regex-match-rate.some-match { color: var(--warn); }
+    .regex-match-rate.no-match   { color: var(--error); }
+    .regex-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .regex-row:last-child { border-bottom: none; }
+    .regex-row.row-no-match { background: #fff9f9; }
+    .chunk-label {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: monospace;
+      min-width: 42px;
+      flex-shrink: 0;
+    }
+    .match-val {
+      color: #166534;
+      font-family: 'Menlo', 'Fira Code', monospace;
+      font-weight: 600;
+      background: #f0fdf4;
+      padding: 1px 7px;
+      border-radius: 4px;
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .no-match-badge {
+      color: #92400e;
+      font-size: 11px;
+      background: #fef3c7;
+      padding: 1px 7px;
+      border-radius: 4px;
+    }
+    .regex-invalid-msg {
+      color: var(--error-text);
+      padding: 8px 10px;
+      font-size: 12px;
+      background: var(--error-bg);
+    }
+    .regex-no-data {
+      color: var(--muted);
+      padding: 8px 10px;
+      font-size: 12px;
+      font-style: italic;
+    }
+    .add-field-row {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      text-align: center;
+      margin-top: 4px;
+    }
+    .add-field-inline {
+      display: none;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .add-field-inline.show { display: flex; }
+    .add-field-inline input {
+      padding: 6px 10px;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+    }
+    .add-field-inline input:focus { border-color: var(--primary); }
+
+    /* ── Summary ── */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
       margin-top: 8px;
     }
+    .summary-cell {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+    }
+    .summary-cell .val { font-size: 26px; font-weight: 700; color: var(--primary); }
+    .summary-cell .lab { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
+    /* ── Progress ── */
+    .progress-bar {
+      width: 100%; height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
     .progress-fill {
       height: 100%;
       background: var(--primary);
-      transition: width 0.3s;
+      border-radius: 3px;
+      transition: width .4s;
+    }
+
+    /* ── Step panels ── */
+    .step-panel { display: none; }
+    .step-panel.active { display: block; }
+
+    /* ── Nav buttons ── */
+    .step-nav { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Inline tag badge */
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+    .tag-blue { background: #dbeafe; color: #1e40af; }
+    .tag-green { background: var(--success-bg); color: var(--success-text); }
+
+    /* ── Mode toggle buttons ── */
+    .mode-btn {
+      padding: 5px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      background: white;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .mode-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .mode-btn.active { border-color: var(--primary); background: var(--primary); color: white; }
+
+    /* ── Metadata input / hint ── */
+    .meta-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s;
+      font-family: inherit;
+    }
+    .meta-input:focus { border-color: var(--primary); }
+    .meta-hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* ── AI 配置助手面板 ── */
+    .assistant-fab {
+      position: fixed;
+      bottom: 80px;
+      right: 24px;
+      z-index: 1000;
+      background: var(--primary);
+      color: white;
+      border-radius: 50px;
+      padding: 12px 20px;
+      box-shadow: 0 4px 16px rgba(37,99,235,.4);
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      transition: transform .2s, box-shadow .2s;
+    }
+    .assistant-fab:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(37,99,235,.5); }
+
+    .assistant-panel {
+      position: fixed;
+      bottom: 0;
+      right: 24px;
+      width: 380px;
+      height: 560px;
+      background: white;
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -4px 32px rgba(0,0,0,.18);
+      z-index: 1001;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      transition: height .25s;
+    }
+    .assistant-panel.open { display: flex; }
+
+    .assistant-header {
+      background: var(--primary);
+      color: white;
+      padding: 13px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .assistant-header-title { font-weight: 600; font-size: 14px; }
+    .assistant-header-sub { font-size: 11px; opacity: .75; margin-top: 2px; }
+    .btn-close-assistant {
+      background: rgba(255,255,255,.2);
+      border: none;
+      color: white;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0; line-height: 1; flex-shrink: 0;
+    }
+    .btn-close-assistant:hover { background: rgba(255,255,255,.35); }
+
+    .assistant-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .assistant-bubble {
+      max-width: 92%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.65;
+      word-break: break-word;
+    }
+    .assistant-bubble.user {
+      align-self: flex-end;
+      background: var(--primary);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .assistant-bubble.assistant {
+      align-self: flex-start;
+      background: #f1f5f9;
+      color: var(--text);
+      border-bottom-left-radius: 4px;
+    }
+    .assistant-code-block {
+      background: #1e293b;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 8px 0 4px;
+      font-family: 'Menlo','Consolas',monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .assistant-apply-btn {
+      display: block;
+      margin-top: 4px;
+      padding: 5px 12px;
+      background: var(--success-bg);
+      color: var(--success-text);
+      border: 1px solid #bbf7d0;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      width: 100%;
+    }
+    .assistant-apply-btn:hover { background: #a7f3d0; }
+
+    .assistant-input-area {
+      border-top: 1px solid var(--border);
+      padding: 10px 12px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      flex-shrink: 0;
+      background: white;
+    }
+    .assistant-input-area textarea {
+      flex: 1;
+      resize: none;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      line-height: 1.5;
+      max-height: 90px;
+      overflow-y: auto;
+      transition: border-color .2s;
+    }
+    .assistant-input-area textarea:focus { border-color: var(--primary); }
+    .btn-send-assistant {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background .2s;
+    }
+    .btn-send-assistant:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-send-assistant:disabled { opacity: .5; cursor: not-allowed; }
+
+    .assistant-typing {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+      padding: 4px 0 2px;
+    }
+    .assistant-typing span {
+      width: 6px; height: 6px;
+      background: var(--muted);
+      border-radius: 50%;
+      animation: typing-bounce .8s infinite;
+    }
+    .assistant-typing span:nth-child(2) { animation-delay: .15s; }
+    .assistant-typing span:nth-child(3) { animation-delay: .3s; }
+    @keyframes typing-bounce {
+      0%, 100% { transform: translateY(0); opacity: .5; }
+      50%       { transform: translateY(-4px); opacity: 1; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>📁 文件上传</h1>
-      <p class="subtitle">上传 Markdown、PDF 等文件到知识库</p>
-      <a href="/" class="nav-link">← 返回问答页面</a>
-    </header>
+<div class="container">
 
-    <div class="upload-card">
-      <div class="upload-zone" id="upload-zone">
-        <div class="upload-icon">📄</div>
-        <div class="upload-text">点击或拖拽文件到此处上传</div>
-        <div class="upload-hint">支持 .md, .pdf, .txt 格式，单个文件最大 10MB</div>
-      </div>
-      <input type="file" id="file-input" multiple accept=".md,.pdf,.txt" />
+  <!-- Header -->
+  <header>
+    <div>
+      <h1>📁 文件上传入库</h1>
+      <p class="sub">按步骤完成：上传预览 → 分块策略 → 元数据配置 → 确认入库</p>
+    </div>
+    <a href="/" class="nav-link">← 返回问答页面</a>
+  </header>
 
-      <div class="file-list" id="file-list"></div>
-
-      <div class="actions">
-        <button class="btn-primary" id="upload-btn" disabled>开始上传</button>
-        <button class="btn-secondary" id="clear-btn">清空列表</button>
-      </div>
-
-      <div id="message"></div>
+  <!-- Stepper -->
+  <div class="stepper" id="stepper">
+    <div class="step active" data-step="1">
+      <div class="step-num">1</div>
+      <div class="step-label">上传&amp;预览</div>
+    </div>
+    <div class="step" data-step="2">
+      <div class="step-num">2</div>
+      <div class="step-label">分块策略</div>
+    </div>
+    <div class="step" data-step="3">
+      <div class="step-num">3</div>
+      <div class="step-label">元数据配置</div>
+    </div>
+    <div class="step" data-step="4">
+      <div class="step-num">4</div>
+      <div class="step-label">确认入库</div>
     </div>
   </div>
 
-  <script>
-    const uploadZone = document.getElementById('upload-zone');
-    const fileInput = document.getElementById('file-input');
-    const fileList = document.getElementById('file-list');
-    const uploadBtn = document.getElementById('upload-btn');
-    const clearBtn = document.getElementById('clear-btn');
-    const messageDiv = document.getElementById('message');
+  <!-- ======= Step 1: Upload & Preview ======= -->
+  <div class="step-panel active" id="panel-1">
+    <div class="card">
+      <div class="card-title">选择并上传文件</div>
+      <div class="upload-zone" id="upload-zone">
+        <div class="upload-icon">📄</div>
+        <div class="upload-text">点击或拖拽文件到此处</div>
+        <div class="upload-hint">支持 .md · .txt · .pdf，最大 10 MB</div>
+      </div>
+      <input type="file" id="file-input" accept=".md,.txt,.pdf" />
+      <div id="upload-msg"></div>
+    </div>
 
-    let files = [];
+    <!-- Preview appears after upload -->
+    <div class="card" id="preview-card" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div>
+          <div class="card-title" style="margin-bottom:4px">内容预览</div>
+          <div style="font-size:12px;color:var(--muted)" id="preview-meta"></div>
+        </div>
+        <span class="tag tag-green" id="preview-status">已解析</span>
+      </div>
+      <div class="preview-box" id="preview-box"></div>
+    </div>
 
-    // 点击上传区域
-    uploadZone.addEventListener('click', () => fileInput.click());
+    <div class="step-nav">
+      <button class="btn-primary" id="btn-step1-next" disabled>下一步：配置分块策略 →</button>
+    </div>
+  </div>
 
-    // 文件选择
-    fileInput.addEventListener('change', (e) => {
-      addFiles(Array.from(e.target.files));
-      fileInput.value = '';
+  <!-- ======= Step 2: Chunk Strategy ======= -->
+  <div class="step-panel" id="panel-2">
+    <div class="card">
+      <div class="card-title">分块策略</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
+        选择如何将文档切分为多个语义块。可以使用 AI 自动建议，也可以手动填写分隔符正则。
+      </p>
+
+      <!-- Pattern input -->
+      <div class="pattern-row">
+        <input type="text" id="pattern-input" placeholder="分隔正则，如 \n---\n 或 (?=^##)" value="\n---\n" />
+        <button class="btn-outline btn-sm" id="btn-ai-suggest">🤖 AI 分析建议</button>
+        <button class="btn-secondary btn-sm" id="btn-preview-chunks">预览分块</button>
+      </div>
+      <div id="pattern-error" style="font-size:12px;color:var(--error);margin-top:6px;display:none"></div>
+
+      <!-- AI suggestion panel -->
+      <div id="ai-suggestion" style="display:none;margin-top:16px;padding:14px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤖 AI 分析中…</div>
+        <div id="ai-thinking" style="display:none;font-family:'Menlo','Consolas',monospace;font-size:11px;background:#fff;border:1px dashed var(--border);border-radius:6px;padding:10px 12px;max-height:160px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;line-height:1.5;color:var(--muted);margin-bottom:10px;"></div>
+        <div id="ai-desc" style="font-size:13px;color:var(--muted);margin-bottom:10px;"></div>
+        <button class="btn-outline btn-sm" id="btn-apply-ai" style="display:none">应用此建议</button>
+      </div>
+
+      <!-- Chunk preview -->
+      <div id="chunks-preview-wrap" style="display:none;margin-top:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-size:13px;font-weight:600;">分块预览</div>
+          <span class="tag tag-blue" id="chunks-total-badge"></span>
+        </div>
+        <div class="chunk-list" id="chunk-list"></div>
+        <div id="chunks-more" style="font-size:12px;color:var(--muted);margin-top:8px;text-align:center;"></div>
+      </div>
+    </div>
+
+    <div class="step-nav">
+      <button class="btn-secondary" onclick="goStep(1)">← 上一步</button>
+      <button class="btn-primary" id="btn-step2-next" disabled>下一步：配置元数据 →</button>
+    </div>
+  </div>
+
+  <!-- ======= Step 3: Metadata ======= -->
+  <div class="step-panel" id="panel-3">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+        <div>
+          <div class="card-title" style="margin-bottom:4px">元数据配置</div>
+          <p style="font-size:13px;color:var(--muted)">
+            为每个块填充元数据。字段来自 AI 建议，可增删。可以用全局固定值或从每块文本正则提取。
+          </p>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;margin-left:12px;align-items:center;">
+          <span id="sample-chunks-badge" style="font-size:11px;color:var(--muted);"></span>
+          <button class="btn-outline btn-sm" id="btn-load-more-samples" onclick="loadMoreSampleChunks()">&#8635; 加载更多样本</button>
+          <button class="btn-outline btn-sm" id="btn-meta-ai-suggest">🤖 重新 AI 建议</button>
+        </div>
+      </div>
+
+      <!-- 第一块预览 -->
+      <div id="meta-chunk-preview" style="margin-bottom:16px;display:none">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px;">📄 第一个分块内容（用于验证正则提取）</div>
+        <div class="preview-box" id="meta-chunk-text" style="max-height:120px;font-size:11px;"></div>
+      </div>
+
+      <!-- 动态字段列表 -->
+      <div id="meta-fields-container"></div>
+
+      <!-- 添加字段 -->
+      <div class="add-field-row">
+        <button class="btn-outline btn-sm" id="btn-add-field" onclick="toggleAddField()">＋ 添加字段</button>
+        <div class="add-field-inline" id="add-field-inline">
+          <input type="text" id="add-field-key" placeholder="字段名（英文）" style="width:140px" />
+          <input type="text" id="add-field-label" placeholder="显示名称" style="width:120px" />
+          <button class="btn-primary btn-sm" onclick="confirmAddField()">确认</button>
+          <button class="btn-secondary btn-sm" onclick="toggleAddField()">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="step-nav">
+      <button class="btn-secondary" onclick="goStep(2)">← 上一步</button>
+      <button class="btn-primary" onclick="goStep(4)">下一步：确认入库 →</button>
+    </div>
+  </div>
+
+  <!-- ======= Step 4: Confirm & Index ======= -->
+  <div class="step-panel" id="panel-4">
+    <div class="card">
+      <div class="card-title">确认并入库</div>
+
+      <div class="summary-grid" id="summary-grid"></div>
+
+      <div style="margin-top:20px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">元数据配置摘要</div>
+        <div id="meta-summary" style="font-size:13px;color:var(--muted);line-height:2;"></div>
+      </div>
+
+      <div id="index-msg" style="margin-top:16px;"></div>
+      <div class="progress-bar" id="index-progress-bar" style="display:none">
+        <div class="progress-fill" id="index-progress-fill" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div class="step-nav">
+      <button class="btn-secondary" id="btn-step4-back" onclick="goStep(3)">← 上一步</button>
+      <button class="btn-primary" id="btn-index" onclick="doIndex()">🚀 开始入库</button>
+      <button class="btn-outline" id="btn-restart" style="display:none" onclick="restart()">重新上传</button>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<!-- ======= AI 配置助手 ======= -->
+<button class="assistant-fab" id="btn-assistant" onclick="toggleAssistant()">💬 配置助手</button>
+
+<div class="assistant-panel" id="assistant-panel">
+  <div class="assistant-header">
+    <div>
+      <div class="assistant-header-title">🤖 配置助手</div>
+      <div class="assistant-header-sub">帮你确定分块策略和元数据提取规则</div>
+    </div>
+    <button class="btn-close-assistant" onclick="closeAssistant()">×</button>
+  </div>
+  <div class="assistant-messages" id="assistant-messages"></div>
+  <div class="assistant-input-area">
+    <textarea id="assistant-input" placeholder="问我关于分块或元数据配置的问题…" rows="2"
+      onkeydown="assistantKeydown(event)"></textarea>
+    <button class="btn-send-assistant" id="btn-send-assistant" onclick="sendAssistantMessage()">发送</button>
+  </div>
+</div>
+
+<script>
+  // =========================================================
+  // State
+  // =========================================================
+  const state = {
+    step: 1,
+    fileId: null,
+    filename: null,
+    contentLength: 0,
+    chunkPattern: '\\n---\\n',
+    totalChunks: 0,
+    firstChunkText: '',          // 第一块内容（兼容保留）
+    previewChunkTexts: [],       // 多块内容，用于正则多块预览
+    aiSuggestion: null,
+    // 动态元数据字段数组：[{ field, label, mode, value, extract_regex, recommended, reason }]
+    metaFields: [],
+  };
+
+  // =========================================================
+  // Step navigation
+  // =========================================================
+  function goStep(n) {
+    state.step = n;
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + n).classList.add('active');
+
+    document.querySelectorAll('.stepper .step').forEach(s => {
+      const sn = parseInt(s.dataset.step);
+      s.classList.remove('active', 'done');
+      if (sn === n) s.classList.add('active');
+      else if (sn < n) s.classList.add('done');
     });
 
-    // 拖拽上传
-    uploadZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      uploadZone.classList.add('dragover');
-    });
+    if (n === 2) validatePattern();
+    if (n === 3) renderMetaFields();
+    if (n === 4) renderSummary();
+    updateAssistantFab();
+  }
 
-    uploadZone.addEventListener('dragleave', () => {
-      uploadZone.classList.remove('dragover');
-    });
+  // =========================================================
+  // Step 1: Upload
+  // =========================================================
+  const uploadZone = document.getElementById('upload-zone');
+  const fileInput  = document.getElementById('file-input');
 
-    uploadZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      uploadZone.classList.remove('dragover');
-      addFiles(Array.from(e.dataTransfer.files));
-    });
+  uploadZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) handleFile(e.target.files[0]);
+    fileInput.value = '';
+  });
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
 
-    // 添加文件
-    function addFiles(newFiles) {
-      const validFiles = newFiles.filter(f => {
-        const ext = f.name.split('.').pop().toLowerCase();
-        const valid = ['md', 'pdf', 'txt'].includes(ext) && f.size <= 10 * 1024 * 1024;
-        if (!valid) {
-          showMessage(`文件 ${f.name} 格式不支持或超过 10MB`, 'error');
-        }
-        return valid;
-      });
+  async function handleFile(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['md','txt','pdf'].includes(ext)) { showMsg('upload-msg', '不支持的文件格式，请上传 .md / .txt / .pdf', 'error'); return; }
+    if (file.size > 10 * 1024 * 1024) { showMsg('upload-msg', '文件不能超过 10 MB', 'error'); return; }
 
-      validFiles.forEach(f => {
-        files.push({
-          file: f,
-          id: Date.now() + Math.random(),
-          status: 'pending'
-        });
-      });
+    showMsg('upload-msg', '<span class="spinner" style="border-color:rgba(0,0,0,.2);border-top-color:#2563eb;"></span> 上传解析中…', 'info');
+    document.getElementById('btn-step1-next').disabled = true;
+    document.getElementById('preview-card').style.display = 'none';
 
-      renderFileList();
-      updateUploadBtn();
+    const fd = new FormData();
+    fd.append('file', file);
+
+    try {
+      const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '上传失败');
+
+      state.fileId = data.file_id;
+      state.filename = data.filename;
+      state.contentLength = data.content_length;
+
+      showMsg('upload-msg', '✓ 上传成功，共 ' + fmtNum(data.content_length) + ' 字符', 'success');
+      renderPreview(data);
+      document.getElementById('btn-step1-next').disabled = false;
+    } catch(e) {
+      showMsg('upload-msg', '❌ ' + e.message, 'error');
     }
+  }
 
-    // 渲染文件列表
-    function renderFileList() {
-      if (files.length === 0) {
-        fileList.innerHTML = '';
+  function renderPreview(data) {
+    document.getElementById('preview-meta').textContent =
+      '文件：' + data.filename + '  ·  大小：' + fmtSize(data.size) + '  ·  字符数：' + fmtNum(data.content_length);
+    document.getElementById('preview-box').textContent = (data.content_preview || '') +
+      (data.content_length > 1000 ? '\n\n… 共 ' + fmtNum(data.content_length) + ' 字符，以上为前 1000 字符预览' : '');
+    document.getElementById('preview-card').style.display = '';
+  }
+
+  document.getElementById('btn-step1-next').addEventListener('click', () => goStep(2));
+
+  // =========================================================
+  // Step 2: Chunk Strategy
+  // =========================================================
+  const patternInput = document.getElementById('pattern-input');
+  const patternError = document.getElementById('pattern-error');
+
+  patternInput.addEventListener('input', () => {
+    validatePattern();
+    clearChunkPreview();
+  });
+
+  function validatePattern() {
+    const val = patternInput.value.trim();
+    try {
+      if (!val) throw new Error('不能为空');
+      new RegExp(val);
+      patternInput.classList.remove('invalid');
+      patternError.style.display = 'none';
+      document.getElementById('btn-step2-next').disabled = false;
+      return true;
+    } catch(e) {
+      patternInput.classList.add('invalid');
+      patternError.textContent = val ? ('正则表达式无效: ' + e.message) : '请输入分块正则表达式';
+      patternError.style.display = '';
+      document.getElementById('btn-step2-next').disabled = true;
+      return false;
+    }
+  }
+
+  function clearChunkPreview() {
+    document.getElementById('chunks-preview-wrap').style.display = 'none';
+    // 不强制禁用，由 validatePattern 决定按钮状态
+    validatePattern();
+  }
+
+  // ── 共享：读取 AI 建议 SSE 流 ──
+  async function readAiSuggestStream(fileId, { onToken, onDone, onError }) {
+    try {
+      const resp = await fetch('/api/upload/chunk-strategy', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ file_id: fileId, strategy: 'llm_suggest' }),
+      });
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        if (onError) onError(d.detail || 'AI 建议失败');
         return;
       }
-
-      fileList.innerHTML = files.map(item => `
-        <div class="file-item" data-id="${item.id}">
-          <div class="file-info">
-            <div>
-              <div class="file-name">${item.file.name}</div>
-              <div class="file-size">${formatSize(item.file.size)}</div>
-            </div>
-          </div>
-          <div class="file-status ${item.status}">${getStatusText(item.status)}</div>
-          <button class="remove-btn" onclick="removeFile(${item.id})" ${item.status === 'uploading' ? 'disabled' : ''}>×</button>
-        </div>
-      `).join('');
-    }
-
-    // 移除文件
-    window.removeFile = function(id) {
-      files = files.filter(f => f.id !== id);
-      renderFileList();
-      updateUploadBtn();
-    };
-
-    // 清空列表
-    clearBtn.addEventListener('click', () => {
-      files = files.filter(f => f.status === 'uploading');
-      renderFileList();
-      updateUploadBtn();
-      messageDiv.innerHTML = '';
-    });
-
-    // 上传按钮状态
-    function updateUploadBtn() {
-      const hasPending = files.some(f => f.status === 'pending');
-      uploadBtn.disabled = !hasPending;
-    }
-
-    // 开始上传
-    uploadBtn.addEventListener('click', async () => {
-      const pendingFiles = files.filter(f => f.status === 'pending');
-      if (pendingFiles.length === 0) return;
-
-      uploadBtn.disabled = true;
-      messageDiv.innerHTML = '';
-
-      for (const item of pendingFiles) {
-        item.status = 'uploading';
-        renderFileList();
-
-        try {
-          await uploadFile(item.file);
-          item.status = 'success';
-        } catch (err) {
-          item.status = 'error';
-          console.error('Upload failed:', err);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const str = line.slice(5).trim();
+          if (!str) continue;
+          let evt;
+          try { evt = JSON.parse(str); } catch { continue; }
+          if (evt.type === 'token')  { if (onToken) onToken(evt.content); }
+          else if (evt.type === 'done')  { if (onDone)  onDone(evt.suggestion); }
+          else if (evt.type === 'error') { if (onError) onError(evt.detail || 'AI 分析错误'); return; }
         }
-        renderFileList();
       }
+    } catch(e) {
+      if (onError) onError(e.message || 'AI 建议失败');
+    }
+  }
 
-      const successCount = files.filter(f => f.status === 'success').length;
-      const errorCount = files.filter(f => f.status === 'error').length;
+  document.getElementById('btn-ai-suggest').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-ai-suggest');
+    if (!state.fileId) { showToast('请先上传文件', 'warn'); return; }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 分析中…';
 
-      if (errorCount === 0) {
-        showMessage(`✓ 成功上传 ${successCount} 个文件`, 'success');
-      } else {
-        showMessage(`上传完成：${successCount} 成功，${errorCount} 失败`, 'error');
-      }
+    const panel    = document.getElementById('ai-suggestion');
+    const titleEl  = panel.querySelector('div:first-child');
+    const thinkEl  = document.getElementById('ai-thinking');
+    const descEl   = document.getElementById('ai-desc');
+    const applyBtn = document.getElementById('btn-apply-ai');
 
-      updateUploadBtn();
+    panel.style.display = '';
+    titleEl.textContent = '🤖 AI 分析中…';
+    thinkEl.textContent = '';
+    thinkEl.style.display = '';
+    descEl.innerHTML = '';
+    applyBtn.style.display = 'none';
+
+    await readAiSuggestStream(state.fileId, {
+      onToken(content) {
+        thinkEl.textContent += content;
+        thinkEl.scrollTop = thinkEl.scrollHeight;
+      },
+      onDone(sug) {
+        state.aiSuggestion = sug;
+        titleEl.textContent = 'AI 建议';
+        thinkEl.style.display = 'none';
+        descEl.innerHTML =
+          '<strong>建议正则：</strong><code style="background:#e2e8f0;padding:2px 6px;border-radius:4px;">' + escHtml(sug.pattern || '') + '</code><br/>' +
+          '<span style="margin-top:6px;display:block">' + escHtml(sug.description || '') + '</span>';
+        applyBtn.style.display = '';
+      },
+      onError(msg) {
+        panel.style.display = 'none';
+        showToast('AI 建议失败: ' + msg, 'error');
+      },
     });
 
-    // 上传单个文件
-    async function uploadFile(file) {
-      const formData = new FormData();
-      formData.append('file', file);
+    btn.disabled = false;
+    btn.innerHTML = '🤖 AI 分析建议';
+  });
 
-      const resp = await fetch('/api/upload', {
+  document.getElementById('btn-apply-ai').addEventListener('click', () => {
+    if (!state.aiSuggestion) return;
+    patternInput.value = state.aiSuggestion.pattern || '';
+    validatePattern();
+    clearChunkPreview();
+    // 用 AI 建议初始化元数据字段列表（进入 Step 3 时生效）
+    state.metaFields = [];
+    initMetaFieldsFromAI();
+    showToast('AI 建议已应用，共准备 ' + state.metaFields.length + ' 个元数据字段', 'info');
+  });
+
+  document.getElementById('btn-preview-chunks').addEventListener('click', async () => {
+    if (!state.fileId) { showToast('请先上传文件', 'warn'); return; }
+    if (!validatePattern()) return;
+
+    const btn = document.getElementById('btn-preview-chunks');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="border-color:rgba(0,0,0,.15);border-top-color:#475569"></span> 分块中…';
+
+    try {
+      const resp = await fetch('/api/upload/chunks-preview', {
         method: 'POST',
-        body: formData
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ file_id: state.fileId, pattern: patternInput.value, max_preview: 10 }),
       });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '分块预览失败');
 
+      state.chunkPattern = patternInput.value;
+      state.totalChunks = data.total_chunks;
+      // 缓存多块内容，供元数据正则多块预览使用
+      state.previewChunkTexts = (data.preview || []).map(function(c) { return c.text; });
+      state.firstChunkText = state.previewChunkTexts[0] || '';
+      renderChunkList(data);
+    } catch(e) {
+      showToast('分块失败: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '预览分块';
+    }
+  });
+
+  function renderChunkList(data) {
+    document.getElementById('chunks-total-badge').textContent = '共 ' + data.total_chunks + ' 块';
+    const list = document.getElementById('chunk-list');
+    list.innerHTML = (data.preview || []).map(function(c) {
+      return '<div class="chunk-item">' +
+        '<div class="chunk-header" onclick="toggleChunk(this)">' +
+          '<span>块 #' + (c.index + 1) + ' <span style="color:var(--muted);font-weight:400">· ' + fmtNum(c.full_length) + ' 字符</span></span>' +
+          '<span class="chunk-badge">▼</span>' +
+        '</div>' +
+        '<div class="chunk-body">' + escHtml(c.text) + '</div>' +
+      '</div>';
+    }).join('');
+
+    const more = document.getElementById('chunks-more');
+    more.textContent = (data.total_chunks > (data.preview||[]).length)
+      ? '仅显示前 ' + (data.preview||[]).length + ' 块，共 ' + data.total_chunks + ' 块…'
+      : '';
+
+    document.getElementById('chunks-preview-wrap').style.display = '';
+    document.getElementById('btn-step2-next').disabled = (data.total_chunks === 0);
+  }
+
+  window.toggleChunk = function(header) {
+    const body = header.nextElementSibling;
+    body.classList.toggle('open');
+    header.querySelector('.chunk-badge').textContent = body.classList.contains('open') ? '▲' : '▼';
+  };
+
+  document.getElementById('btn-step2-next').addEventListener('click', () => {
+    // 若未点预览，直接将当前 pattern 写入 state
+    if (!state.chunkPattern || state.chunkPattern !== patternInput.value) {
+      state.chunkPattern = patternInput.value;
+    }
+    goStep(3);
+  });
+
+  // =========================================================
+  // Step 3: Metadata (Dynamic Fields)
+  // =========================================================
+
+  // 从 AI 建议初始化 metaFields 数组
+  function initMetaFieldsFromAI() {
+    if (!state.aiSuggestion || !state.aiSuggestion.metadata_fields) return;
+    state.metaFields = state.aiSuggestion.metadata_fields.map(function(f) {
+      return {
+        field: f.field || '',
+        label: f.label || f.field || '',
+        mode: (f.extract_regex && f.extract_regex.trim()) ? 'regex' : 'global',
+        value: '',
+        extract_regex: f.extract_regex || '',
+        recommended: f.recommended !== false,
+        reason: f.reason || '',
+      };
+    });
+  }
+
+  // goStep(3) 时调用：初始化或保持现有字段
+  function renderMetaFields() {
+    // 若已有字段（用户手动改过），不重置
+    if (state.metaFields.length === 0) {
+      if (state.aiSuggestion && state.aiSuggestion.metadata_fields) {
+        initMetaFieldsFromAI();
+      } else {
+        // 回退到默认三字段
+        state.metaFields = [
+          { field: 'date',    label: '日期',   mode: 'global', value: '', extract_regex: '', recommended: true,  reason: '' },
+          { field: 'company', label: '公司',   mode: 'global', value: '', extract_regex: '', recommended: true,  reason: '' },
+          { field: 'owner',   label: '负责人', mode: 'global', value: '', extract_regex: '', recommended: true,  reason: '' },
+        ];
+      }
+    }
+    // 显示第一块文本预览
+    if (state.firstChunkText) {
+      document.getElementById('meta-chunk-text').textContent = state.firstChunkText;
+      document.getElementById('meta-chunk-preview').style.display = '';
+    }
+    updateSampleBadge();
+    renderMetaFieldsDOM();
+    // 自动补拉50块（若当前样本不足）
+    if (state.previewChunkTexts.length < 20 && state.fileId && state.chunkPattern) {
+      loadMoreSampleChunks(true);
+    }
+  }
+
+  function updateSampleBadge() {
+    var el = document.getElementById('sample-chunks-badge');
+    if (el) {
+      var n = state.previewChunkTexts.length;
+      el.textContent = n > 0 ? ('当前样本: ' + n + ' 块') : '';
+    }
+  }
+
+  // 加载更多样本块（silent=true 时不改动按钮状态）
+  window.loadMoreSampleChunks = async function(silent) {
+    if (!state.fileId || !state.chunkPattern) {
+      if (!silent) showToast('请先完成文件上传和分块设置', 'warn');
+      return;
+    }
+    var btn = document.getElementById('btn-load-more-samples');
+    if (btn && !silent) { btn.disabled = true; btn.textContent = '加载中…'; }
+    try {
+      var resp = await fetch('/api/upload/chunks-preview', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ file_id: state.fileId, pattern: state.chunkPattern, max_preview: 50 }),
+      });
+      var data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '加载失败');
+      state.previewChunkTexts = (data.preview || []).map(function(c) { return c.text; });
+      state.firstChunkText = state.previewChunkTexts[0] || state.firstChunkText;
+      updateSampleBadge();
+      // 刷新所有正则预览
+      state.metaFields.forEach(function(f, i) {
+        if (f.mode === 'regex') {
+          var el = document.getElementById('meta-regex-preview-' + i);
+          if (el) el.innerHTML = renderRegexPreviewMulti(f.extract_regex || '');
+        }
+      });
+      if (!silent) showToast('已加载 ' + state.previewChunkTexts.length + ' 个样本块', 'info');
+    } catch(e) {
+      if (!silent) showToast('加载失败: ' + e.message, 'error');
+    } finally {
+      if (btn && !silent) { btn.disabled = false; btn.textContent = '&#8635; 加载更多样本'; }
+    }
+  };
+
+  // 渲染 meta-fields-container 内容
+  function renderMetaFieldsDOM() {
+    const container = document.getElementById('meta-fields-container');
+    if (state.metaFields.length === 0) {
+      container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px;">暂无元数据字段，可点击下方「添加字段」手动添加。</div>';
+      return;
+    }
+    container.innerHTML = state.metaFields.map(function(f, i) {
+      return (
+        '<div class="meta-field-row' + (f.recommended ? ' recommended' : '') + '" id="meta-row-' + i + '">' +
+          '<div class="meta-field-row-header">' +
+            '<span class="meta-field-name">' + escHtml(f.label || f.field) + '</span>' +
+            '<span class="meta-field-key">' + escHtml(f.field) + '</span>' +
+            (f.reason ? '<span class="meta-reason">' + escHtml(f.reason) + '</span>' : '') +
+            '<button class="btn-remove-field" onclick="removeMetaField(' + i + ')" title="删除此字段">×</button>' +
+          '</div>' +
+          '<div class="meta-field-body">' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">' +
+              '<button class="mode-btn' + (f.mode === 'global' ? ' active' : '') + '" onclick="setMetaFieldMode(' + i + ',\'global\',this)">全局固定</button>' +
+              '<button class="mode-btn' + (f.mode === 'regex'  ? ' active' : '') + '" onclick="setMetaFieldMode(' + i + ',\'regex\',this)">正则提取</button>' +
+              '<button class="mode-btn' + (f.mode === 'skip'   ? ' active' : '') + '" onclick="setMetaFieldMode(' + i + ',\'skip\',this)">跳过</button>' +
+            '</div>' +
+            '<div id="meta-input-' + i + '">' + renderMetaFieldInput(f, i) + '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function renderMetaFieldInput(f, i) {
+    if (f.mode === 'skip') {
+      return '<span style="color:var(--muted);font-size:12px">（不填充此字段）</span>';
+    }
+    if (f.mode === 'global') {
+      return '<input class="meta-input" type="text" placeholder="全局固定值，所有块相同" value="' + escAttr(f.value || '') + '" oninput="state.metaFields[' + i + '].value=this.value" />' +
+             '<div class="meta-hint">所有块使用同一固定值</div>';
+    }
+    if (f.mode === 'regex') {
+      return '<input class="meta-input" type="text" placeholder="提取正则，第一个捕获组作为值，如: (\\d{4}-\\d{2}-\\d{2})" value="' + escAttr(f.extract_regex || '') + '" oninput="onMetaRegexInput(this,' + i + ')" />' +
+             '<div class="meta-hint">用第一个捕获组从每块文本中提取，匹配失败则留空</div>' +
+             '<div id="meta-regex-preview-' + i + '">' + renderRegexPreviewMulti(f.extract_regex || '') + '</div>';
+    }
+    return '';
+  }
+
+  // 多块正则预览：返回 HTML 字符串
+  function renderRegexPreviewMulti(regex) {
+    const chunks = state.previewChunkTexts.length > 0
+      ? state.previewChunkTexts
+      : (state.firstChunkText ? [state.firstChunkText] : []);
+    if (!regex) {
+      return '<div class="regex-multi-preview"><div class="regex-no-data">请输入正则表达式以预览提取结果…</div></div>';
+    }
+    if (chunks.length === 0) {
+      return '<div class="regex-multi-preview"><div class="regex-no-data">返回上一步点击「预览分块」后可在此查看多块提取效果</div></div>';
+    }
+    var re;
+    try {
+      re = new RegExp(regex);
+    } catch(e) {
+      return '<div class="regex-multi-preview"><div class="regex-invalid-msg">⚠ 正则无效: ' + escHtml(e.message) + '</div></div>';
+    }
+    var rows = '';
+    var matchCount = 0;
+    chunks.forEach(function(text, idx) {
+      var m = text.match(re);
+      if (m) {
+        matchCount++;
+        var val = m[1] !== undefined ? m[1] : m[0];
+        rows += '<div class="regex-row">' +
+          '<span class="chunk-label">块 #' + (idx + 1) + '</span>' +
+          '<span class="match-val" title="' + escAttr(val) + '">' + escHtml(val) + '</span>' +
+        '</div>';
+      } else {
+        rows += '<div class="regex-row row-no-match">' +
+          '<span class="chunk-label">块 #' + (idx + 1) + '</span>' +
+          '<span class="no-match-badge">无匹配</span>' +
+        '</div>';
+      }
+    });
+    var rateClass = matchCount === chunks.length ? 'all-match' : matchCount === 0 ? 'no-match' : 'some-match';
+    var totalStr = state.totalChunks > chunks.length
+      ? chunks.length + ' / 共 ' + state.totalChunks + ' 块'
+      : chunks.length + ' 块';
+    var headerHtml = '<div class="regex-preview-header">' +
+      '<span>提取结果预览（样本 ' + totalStr + '）</span>' +
+      '<span class="regex-match-rate ' + rateClass + '">' + matchCount + ' / ' + chunks.length + ' 块匹配</span>' +
+    '</div>';
+    return '<div class="regex-multi-preview">' + headerHtml + rows + '</div>';
+  }
+
+  window.onMetaRegexInput = function(input, i) {
+    state.metaFields[i].extract_regex = input.value;
+    var previewEl = document.getElementById('meta-regex-preview-' + i);
+    if (previewEl) {
+      previewEl.innerHTML = renderRegexPreviewMulti(input.value);
+    }
+  };
+
+  window.setMetaFieldMode = function(i, mode, btn) {
+    state.metaFields[i].mode = mode;
+    btn.closest('div').querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    document.getElementById('meta-input-' + i).innerHTML = renderMetaFieldInput(state.metaFields[i], i);
+  };
+
+  window.removeMetaField = function(i) {
+    state.metaFields.splice(i, 1);
+    renderMetaFieldsDOM();
+  };
+
+  window.toggleAddField = function() {
+    var row = document.getElementById('add-field-inline');
+    row.classList.toggle('show');
+    if (row.classList.contains('show')) {
+      document.getElementById('add-field-key').value = '';
+      document.getElementById('add-field-label').value = '';
+      document.getElementById('add-field-key').focus();
+    }
+  };
+
+  window.confirmAddField = function() {
+    var key   = document.getElementById('add-field-key').value.trim();
+    var label = document.getElementById('add-field-label').value.trim();
+    if (!key) { showToast('字段名不能为空', 'warn'); return; }
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) { showToast('字段名只能包含字母、数字、下划线，且不能以数字开头', 'warn'); return; }
+    if (state.metaFields.some(function(f) { return f.field === key; })) { showToast('字段 ' + key + ' 已存在', 'warn'); return; }
+    state.metaFields.push({ field: key, label: label || key, mode: 'global', value: '', extract_regex: '', recommended: false, reason: '' });
+    document.getElementById('add-field-inline').classList.remove('show');
+    renderMetaFieldsDOM();
+  };
+
+  // 「重新 AI 建议」按钮：重新拉取元数据字段建议
+  document.getElementById('btn-meta-ai-suggest').addEventListener('click', async function() {
+    const btn = this;
+    if (!state.fileId) { showToast('请先完成文件上传', 'warn'); return; }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 分析中…';
+
+    await readAiSuggestStream(state.fileId, {
+      onToken() {},  // 元数据步骤静默流式
+      onDone(sug) {
+        state.aiSuggestion = sug;
+        state.metaFields = [];
+        initMetaFieldsFromAI();
+        renderMetaFieldsDOM();
+        showToast('AI 建议已刷新，共 ' + state.metaFields.length + ' 个字段', 'info');
+      },
+      onError(msg) { showToast('AI 建议失败: ' + msg, 'error'); },
+    });
+
+    btn.disabled = false;
+    btn.innerHTML = '🤖 重新 AI 建议';
+  });
+
+  // =========================================================
+  // Step 4: Summary + Index
+  // =========================================================
+  function renderSummary() {
+    document.getElementById('summary-grid').innerHTML =
+      '<div class="summary-cell"><div class="val">' + fmtNum(state.totalChunks) + '</div><div class="lab">分块数</div></div>' +
+      '<div class="summary-cell"><div class="val">' + fmtNum(state.contentLength) + '</div><div class="lab">总字符</div></div>' +
+      '<div class="summary-cell"><div class="val" style="font-size:14px;padding-top:8px">' + escHtml(state.filename||'') + '</div><div class="lab">文件名</div></div>';
+
+    const fieldLines = state.metaFields.length === 0
+      ? '<em style="color:var(--muted)">未配置任何元数据字段</em>'
+      : state.metaFields.map(function(f) {
+          if (f.mode === 'skip')   return '<strong>' + escHtml(f.label || f.field) + '</strong>（<code style="background:#e2e8f0;padding:1px 5px;border-radius:3px">' + escHtml(f.field) + '</code>）：<em>跳过</em>';
+          if (f.mode === 'global') return '<strong>' + escHtml(f.label || f.field) + '</strong>（<code style="background:#e2e8f0;padding:1px 5px;border-radius:3px">' + escHtml(f.field) + '</code>）：全局固定 "<strong>' + escHtml(f.value || '（空）') + '</strong>"';
+          if (f.mode === 'regex')  return '<strong>' + escHtml(f.label || f.field) + '</strong>（<code style="background:#e2e8f0;padding:1px 5px;border-radius:3px">' + escHtml(f.field) + '</code>）：正则提取 <code style="background:#e2e8f0;padding:1px 5px;border-radius:3px">' + escHtml(f.extract_regex || '（未填）') + '</code>';
+          return '';
+        }).join('<br/>');
+
+    document.getElementById('meta-summary').innerHTML = fieldLines;
+
+    document.getElementById('index-msg').innerHTML = '';
+    document.getElementById('index-progress-bar').style.display = 'none';
+    const btn = document.getElementById('btn-index');
+    btn.disabled = false;
+    btn.style.display = '';
+    btn.innerHTML = '🚀 开始入库';
+    document.getElementById('btn-step4-back').disabled = false;
+    document.getElementById('btn-restart').style.display = 'none';
+  }
+
+  async function doIndex() {
+    const btn = document.getElementById('btn-index');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 向量化入库中…';
+    document.getElementById('btn-step4-back').disabled = true;
+    document.getElementById('index-progress-bar').style.display = '';
+    animateProgress();
+
+    // 将 metaFields 转换为后端期望的格式
+    const metaConfigs = state.metaFields.map(function(f) {
+      return {
+        field: f.field,
+        label: f.label || f.field,
+        mode: f.mode,
+        value: f.value || '',
+        extract_regex: f.extract_regex || '',
+      };
+    });
+
+    try {
+      const resp = await fetch('/api/upload/confirm-index', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          file_id: state.fileId,
+          filename: state.filename,
+          pattern: state.chunkPattern,
+          metadata_configs: metaConfigs,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '入库失败');
+
+      document.getElementById('index-progress-fill').style.width = '100%';
+      clearInterval(_progressTimer);
+      showMsg('index-msg', '🎉 入库完成！共写入 <strong>' + data.indexed_count + '</strong> 个块到向量库。', 'success');
+      btn.style.display = 'none';
+      document.getElementById('btn-step4-back').disabled = false;
+      document.getElementById('btn-restart').style.display = '';
+    } catch(e) {
+      clearInterval(_progressTimer);
+      showMsg('index-msg', '❌ ' + e.message, 'error');
+      btn.disabled = false;
+      btn.innerHTML = '🚀 重试入库';
+      document.getElementById('btn-step4-back').disabled = false;
+      document.getElementById('index-progress-bar').style.display = 'none';
+    }
+  }
+
+  let _progressTimer = null;
+  function animateProgress() {
+    clearInterval(_progressTimer);
+    let pct = 0;
+    const fill = document.getElementById('index-progress-fill');
+    fill.style.width = '0%';
+    _progressTimer = setInterval(function() {
+      pct = Math.min(pct + Math.random() * 8, 90);
+      fill.style.width = pct + '%';
+    }, 400);
+  }
+
+  function restart() {
+    clearInterval(_progressTimer);
+    state.fileId = null;
+    state.filename = null;
+    state.contentLength = 0;
+    state.chunkPattern = '\\n---\\n';
+    state.totalChunks = 0;
+    state.firstChunkText = '';
+    state.aiSuggestion = null;
+    state.metaFields = [];
+    document.getElementById('upload-msg').innerHTML = '';
+    document.getElementById('preview-card').style.display = 'none';
+    document.getElementById('btn-step1-next').disabled = true;
+    document.getElementById('pattern-input').value = '\\n---\\n';
+    clearChunkPreview();
+    document.getElementById('ai-suggestion').style.display = 'none';
+    // 重置助手
+    assistantState.messages = [];
+    assistantState.initialized = false;
+    assistantState.streaming = false;
+    closeAssistant();
+    goStep(1);
+  }
+
+  // =========================================================
+  // Utilities
+  // =========================================================
+  // =========================================================
+  // AI 配置助手
+  // =========================================================
+  const assistantState = {
+    open: false,
+    messages: [],
+    streaming: false,
+    initialized: false,
+  };
+
+  function updateAssistantFab() {
+    const fab = document.getElementById('btn-assistant');
+    if ((state.step === 2 || state.step === 3) && !assistantState.open) {
+      fab.style.display = 'flex';
+    } else {
+      fab.style.display = 'none';
+    }
+  }
+
+  function toggleAssistant() {
+    assistantState.open ? closeAssistant() : openAssistant();
+  }
+
+  function openAssistant() {
+    assistantState.open = true;
+    document.getElementById('assistant-panel').classList.add('open');
+    document.getElementById('btn-assistant').style.display = 'none';
+    if (!assistantState.initialized) {
+      assistantState.initialized = true;
+      renderAssistantMessages();
+    }
+    setTimeout(() => document.getElementById('assistant-input').focus(), 120);
+  }
+
+  function closeAssistant() {
+    assistantState.open = false;
+    document.getElementById('assistant-panel').classList.remove('open');
+    updateAssistantFab();
+  }
+
+  function assistantKeydown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendAssistantMessage();
+    }
+  }
+
+  async function sendAssistantMessage() {
+    const input = document.getElementById('assistant-input');
+    const text = input.value.trim();
+    if (!text || assistantState.streaming) return;
+    if (!state.fileId) { showToast('请先完成文件上传', 'warn'); return; }
+
+    assistantState.messages.push({ role: 'user', content: text });
+    input.value = '';
+    input.style.height = 'auto';
+
+    // 添加流占位消息
+    assistantState.messages.push({ role: 'assistant', content: '', streaming: true });
+    renderAssistantMessages();
+    scrollAssistantToBottom();
+
+    assistantState.streaming = true;
+    document.getElementById('btn-send-assistant').disabled = true;
+
+    // 只发送非占位消息
+    const sendMsgs = assistantState.messages
+      .filter(m => !m.streaming)
+      .map(({ role, content }) => ({ role, content }));
+
+    try {
+      const resp = await fetch('/api/upload/assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_id: state.fileId,
+          messages: sendMsgs,
+          current_pattern: state.chunkPattern,
+          meta_fields: state.metaFields,
+          step: state.step,
+        }),
+      });
       if (!resp.ok) {
-        const data = await resp.json();
-        throw new Error(data.detail || '上传失败');
+        const d = await resp.json().catch(() => ({}));
+        throw new Error(d.detail || '请求失败');
       }
 
-      return resp.json();
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const lastIdx = assistantState.messages.length - 1;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const str = line.slice(5).trim();
+          if (!str) continue;
+          let evt;
+          try { evt = JSON.parse(str); } catch { continue; }
+          if (evt.type === 'token') {
+            assistantState.messages[lastIdx].content += evt.content;
+            updateStreamingBubble(lastIdx);
+          } else if (evt.type === 'done') {
+            assistantState.messages[lastIdx].streaming = false;
+            renderAssistantMessages();
+            scrollAssistantToBottom();
+          } else if (evt.type === 'error') {
+            assistantState.messages[lastIdx].content = '❌ ' + (evt.detail || '发生错误');
+            assistantState.messages[lastIdx].streaming = false;
+            renderAssistantMessages();
+          }
+        }
+      }
+    } catch (e) {
+      const lastIdx = assistantState.messages.length - 1;
+      assistantState.messages[lastIdx].content = '❌ ' + e.message;
+      assistantState.messages[lastIdx].streaming = false;
+      renderAssistantMessages();
     }
 
-    // 工具函数
-    function formatSize(bytes) {
-      if (bytes < 1024) return bytes + ' B';
-      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    }
+    assistantState.streaming = false;
+    document.getElementById('btn-send-assistant').disabled = false;
+    scrollAssistantToBottom();
+  }
 
-    function getStatusText(status) {
-      const map = {
-        pending: '待上传',
-        uploading: '上传中...',
-        success: '成功',
-        error: '失败'
-      };
-      return map[status] || status;
+  function updateStreamingBubble(idx) {
+    const el = document.querySelector('.assistant-bubble[data-idx="' + idx + '"]');
+    if (el) {
+      el.innerHTML = renderMessageContent(assistantState.messages[idx].content) +
+        '<div class="assistant-typing"><span></span><span></span><span></span></div>';
+      scrollAssistantToBottom();
     }
+  }
 
-    function showMessage(text, type) {
-      messageDiv.innerHTML = `<div class="message ${type}">${text}</div>`;
+  function renderAssistantMessages() {
+    const container = document.getElementById('assistant-messages');
+    if (!container) return;
+    if (!assistantState.messages.length) {
+      container.innerHTML =
+        '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px 8px">' +
+        '<div style="font-size:36px;margin-bottom:12px">🤖</div>' +
+        '<div style="font-weight:600;margin-bottom:8px">你好！我是配置助手</div>' +
+        '<div>你可以问我：</div>' +
+        '<ul style="text-align:left;margin-top:10px;padding-left:20px;line-height:2.2">' +
+        '<li>这个文档应该如何分块？</li>' +
+        '<li>如何提取日期/公司/负责人字段？</li>' +
+        '<li>帮我写一个提取日期的正则</li>' +
+        '<li>当前正则有什么问题？</li>' +
+        '</ul></div>';
+      return;
     }
-  </script>
+    container.innerHTML = assistantState.messages.map((m, i) => {
+      const isUser = m.role === 'user';
+      const inner = m.streaming
+        ? renderMessageContent(m.content) +
+          '<div class="assistant-typing"><span></span><span></span><span></span></div>'
+        : renderMessageContent(m.content);
+      return `<div class="assistant-bubble ${isUser ? 'user' : 'assistant'}" data-idx="${i}">${inner}</div>`;
+    }).join('');
+  }
+
+  function renderMessageContent(text) {
+    let html = '';
+    const re = /```([\w-]*)\n?([\s\S]*?)```/g;
+    let last = 0;
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(text)) !== null) {
+      html += fmtPlainText(text.slice(last, m.index));
+      const lang = m[1], code = m[2].trim();
+      if (lang === 'chunk-pattern') {
+        html += `<div class="assistant-code-block">${escHtml(code)}</div>` +
+          `<button class="assistant-apply-btn" onclick="applyChunkPattern(${JSON.stringify(code)})">✅ 应用为分块正则</button>`;
+      } else if (lang === 'field-regex') {
+        html += `<div class="assistant-code-block">${escHtml(code)}</div>`;
+        code.split('\n').filter(l => l.trim()).forEach(line => {
+          const ci = line.indexOf(':');
+          if (ci === -1) return;
+          const fieldPart = line.slice(0, ci).trim();
+          const regex = line.slice(ci + 1).trim();
+          const fm = fieldPart.match(/^([\w_]+)/);
+          if (!fm || !regex) return;
+          html += `<button class="assistant-apply-btn" onclick="applyFieldRegex(${JSON.stringify(fm[1])},${JSON.stringify(regex)})">✅ 应用到字段 ${escHtml(fieldPart)}</button>`;
+        });
+      } else {
+        html += `<div class="assistant-code-block">${escHtml(code)}</div>`;
+      }
+      last = m.index + m[0].length;
+    }
+    html += fmtPlainText(text.slice(last));
+    return html;
+  }
+
+  function fmtPlainText(text) {
+    if (!text) return '';
+    return escHtml(text)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code style="background:#e2e8f0;padding:1px 5px;border-radius:4px;font-size:11px;font-family:Menlo,monospace">$1</code>')
+      .replace(/\n/g, '<br>');
+  }
+
+  function scrollAssistantToBottom() {
+    const el = document.getElementById('assistant-messages');
+    if (el) el.scrollTop = el.scrollHeight;
+  }
+
+  window.applyChunkPattern = function(pattern) {
+    const input = document.getElementById('pattern-input');
+    if (!input) return;
+    input.value = pattern;
+    input.dispatchEvent(new Event('input'));
+    state.chunkPattern = pattern;
+    showToast('✅ 分块正则已应用', 'info');
+    // 如果在步骤3，切回步骤2让用户确认
+    if (state.step === 3) goStep(2);
+  };
+
+  window.applyFieldRegex = function(field, regex) {
+    let found = false;
+    for (let i = 0; i < state.metaFields.length; i++) {
+      if (state.metaFields[i].field === field) {
+        state.metaFields[i].extract_regex = regex;
+        state.metaFields[i].mode = 'regex';
+        found = true;
+        // 更新 DOM 中 regex input
+        const inputEl = document.querySelector(
+          '.meta-field-row:nth-child(' + (i + 1) + ') .meta-input[type="text"]'
+        );
+        if (inputEl) {
+          inputEl.value = regex;
+          onMetaRegexInput(inputEl, i);
+        } else {
+          renderMetaFieldsDOM();
+        }
+        showToast('✅ 字段 ' + field + ' 正则已应用', 'info');
+        // 切到步骤3让用户查看
+        if (state.step !== 3) goStep(3);
+        break;
+      }
+    }
+    if (!found) {
+      showToast('字段 ' + field + ' 不存在，请先在元数据配置中添加此字段', 'warn');
+    }
+  };
+
+  function showMsg(id, html, type) {
+    document.getElementById(id).innerHTML = '<div class="msg ' + type + '">' + html + '</div>';
+  }
+
+  let _toastEl = null;
+  function showToast(msg, type) {
+    type = type || 'info';
+    if (_toastEl) _toastEl.remove();
+    _toastEl = document.createElement('div');
+    _toastEl.className = 'msg ' + type;
+    _toastEl.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;min-width:240px;box-shadow:0 4px 16px rgba(0,0,0,.15)';
+    _toastEl.innerHTML = msg;
+    document.body.appendChild(_toastEl);
+    setTimeout(function() { if (_toastEl) { _toastEl.remove(); _toastEl = null; } }, 3500);
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function escAttr(s) {
+    return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+  function fmtSize(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+    return (b/(1024*1024)).toFixed(1) + ' MB';
+  }
+  function fmtNum(n) {
+    return Number(n).toLocaleString('zh-CN');
+  }
+</script>
 </body>
 </html>

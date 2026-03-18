@@ -16,6 +16,7 @@ except ImportError:
 # ========== 基础路径 ==========
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
+UPLOAD_TEMP_DIR = BASE_DIR / "data" / "uploads_temp"  # 临时上传文件目录
 
 # ========== Chat 模型配置 ==========
 CHAT_API_KEY = os.getenv("CHAT_API_KEY", "")  # 必填，在 .env 中设置

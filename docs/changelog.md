@@ -18,11 +18,11 @@
 10. [回答质量评价体系](#10-回答质量评价体系)
 11. [MCP 数据源集成](#11-mcp-数据源集成)
 12. [后续优化方向](#12-后续优化方向)
-3. [日志系统增强](#3-日志系统增强)
-4. [OpenAPI 规范化（OpenClaw 接入）](#4-openapi-规范化openclaw-接入)
-5. [聚合查询修复](#5-聚合查询修复)
-6. [元数据精确过滤路由](#6-元数据精确过滤路由)
-7. [聚合关键词量词变体正则修复](#7-聚合关键词量词变体正则修复)
+13. [文件上传入库（4步向导）](#13-文件上传入库4步向导)
+14. [AI 分块分析流式输出](#14-ai-分块分析流式输出)
+15. [Milvus gRPC 64MB 批量写入修复](#15-milvus-grpc-64mb-批量写入修复)
+16. [内容 Hash 去重（跨文件重叠处理）](#16-内容-hash-去重跨文件重叠处理)
+17. [上传配置 AI 助手（多轮对话）](#17-上传配置-ai-助手多轮对话)
 
 ---
 
@@ -1015,3 +1015,205 @@ else:
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `CHAT_API_MODE` | `responses` | API 模式：`responses`（新版）或 `completions`（传统） |
+
+---
+
+## 13. 文件上传入库（4步向导）
+
+**文件**: `static/upload.html`（新增）、`app/main.py`、`app/vector_store.py`
+
+**日期**: 2026-03-18
+
+### 功能
+
+新增 `/upload` 页面，提供 4 步向导将任意 Markdown / TXT / PDF 文件增量入库，无需修改代码或重建全量索引。
+
+### 步骤说明
+
+| 步骤 | 内容 |
+|---|---|
+| 1 上传&预览 | 拖拽或点击上传文件，预览解析后的原文 |
+| 2 分块策略 | 填写分隔符正则，支持预览分块效果；可点击「AI 分析建议」自动推荐 |
+| 3 元数据配置 | 为每个字段选择模式（全局固定值 / 正则提取 / 跳过），正则实时预览提取结果 |
+| 4 确认入库 | 展示配置摘要，点击「开始入库」调用后端，完成增量写入 |
+
+### 新增 API 端点
+
+| operationId | 方法 | 路径 | 说明 |
+|---|---|---|---|
+| `uploadFile` | POST | `/api/upload` | 上传文件到临时目录，返回 `file_id` 和原文预览 |
+| `getChunkStrategy` | POST | `/api/upload/chunk-strategy` | 预览分块结果；`strategy=llm_suggest` 时调用 LLM 分析 |
+| `confirmIndex` | POST | `/api/upload/confirm-index` | 按配置分块+提取元数据，增量写入向量库 |
+
+### 元数据动态字段
+
+Step 3 的字段列表完全由 AI 建议或用户自定义驱动，传递到后端 `metadata_configs` 数组：
+
+```python
+class MetadataFieldConfig(BaseModel):
+    field: str             # 字段名（Milvus 动态字段）
+    label: str             # 显示名
+    mode: str              # "global" | "regex" | "skip"
+    value: str = ""        # global 模式的固定值
+    extract_regex: str = "" # regex 模式的提取正则
+```
+
+---
+
+## 14. AI 分块分析流式输出
+
+**文件**: `app/main.py`、`static/upload.html`
+
+**日期**: 2026-03-18
+
+### 问题
+
+`/api/upload/chunk-strategy?strategy=llm_suggest` 原本使用同步 `httpx.Client` 阻塞等待 LLM 完整响应（约 5~10 秒），用户无任何反馈，体验差。
+
+### 解决方案
+
+**后端**：将 `llm_suggest` 分支改为 `httpx.AsyncClient` + `aiter_lines()` 流式，通过 `StreamingResponse(media_type="text/event-stream")` 即时推送 SSE 事件：
+
+```
+data: {"type": "token", "content": "..."}
+data: {"type": "done",  "suggestion": {...}}
+data: {"type": "error", "detail": "..."}
+```
+
+**前端**：
+- `#ai-suggestion` 面板新增 `#ai-thinking` 区域（等宽字体，最高 160px 滚动），token 逐字追加显示
+- `btn-apply-ai` 初始隐藏，`type=done` 事件触发后才显示
+- 提取公共 helper `readAiSuggestStream(fileId, {onToken, onDone, onError})`，`btn-ai-suggest` 和 `btn-meta-ai-suggest` 均复用此函数
+- Step 3「重新 AI 建议」按钮静默消费 token（不显示 thinking 区域），完成后直接刷新字段列表
+
+### AI 分块 Prompt 优化
+
+同步重写了 LLM prompt，3 步结构 + 明确反模式：
+
+1. 识别分隔符 → 选择最简模式（`\n---\n` 即够用，禁止嵌套捕获组）
+2. 提取元数据字段+正则
+3. 生成 JSON 输出
+
+---
+
+## 15. Milvus gRPC 64MB 批量写入修复
+
+**文件**: `app/vector_store.py`
+
+**日期**: 2026-03-18
+
+### 问题
+
+上传 15,660 条记录时报错：
+
+```
+grpc: received message larger than max (105286714 vs. 67108864)
+```
+
+gRPC 默认单条消息上限 64MB，单次 `col.insert(rows)` 超限。
+
+### 解决方案
+
+`build_index()` 和 `insert_chunks()` 均改为分批写入：
+
+```python
+INSERT_BATCH = 500
+for b in range(0, len(rows), INSERT_BATCH):
+    col.insert(rows[b: b + INSERT_BATCH])
+    done = min(b + INSERT_BATCH, len(rows))
+    print(f"  [Milvus] 已写入 {done}/{len(rows)} 条")
+col.flush()
+```
+
+---
+
+## 16. 内容 Hash 去重（跨文件重叠处理）
+
+**文件**: `app/main.py`、`app/vector_store.py`
+
+**日期**: 2026-03-18
+
+### 问题
+
+同一批活动记录多次导出（如 1月~3月 + 2月~4月），重叠部分会重复入库，浪费向量存储且污染检索排名。
+
+原 `chunk_id = upload_{uuid}_{i}` 依赖文件级 UUID，每次上传均不同，无法碰撞去重。
+
+### 解决方案
+
+**`app/main.py`（`confirm_index_endpoint`）**：将 `chunk_id` 改为内容 MD5：
+
+```python
+"chunk_id": hashlib.md5(text.encode("utf-8")).hexdigest()[:32]
+```
+
+**`app/vector_store.py`（`insert_chunks`）**：写入前批量查询已存在的 `chunk_id`，过滤后只对新增内容调用 `embed_texts`：
+
+```python
+QUERY_BATCH = 200
+for bi in range(0, len(all_ids), QUERY_BATCH):
+    expr = 'chunk_id in [' + ', '.join(f'"{cid}"' for cid in batch) + ']'
+    rows = col.query(expr=expr, output_fields=["chunk_id"], limit=len(batch))
+    existing_ids.update(r["chunk_id"] for r in rows)
+
+new_chunks = [c for c in chunks if c["chunk_id"] not in existing_ids]
+```
+
+与 SQLite embedding 缓存协作：已入库直接跳过 embed；未入库但 text 相同时命中缓存，不调用 API。
+
+---
+
+## 17. 上传配置 AI 助手（多轮对话）
+
+**文件**: `app/main.py`、`static/upload.html`
+
+**日期**: 2026-03-18
+
+### 功能
+
+在 Step 2（分块策略）和 Step 3（元数据配置）页面右下角新增悬浮「💬 配置助手」按钮，点击弹出聊天面板，用户可通过自然语言对话来确定最佳配置，降低正则使用门槛。
+
+### 后端：`POST /api/upload/assistant`
+
+- 读取上传临时文件前 3000 字符作为文档样本
+- 系统提示注入当前分块正则 + 元数据字段状态
+- 流式 SSE 返回，格式与 `chunk-strategy` 接口一致
+- 引导 AI 使用特殊代码块标记输出建议：
+
+| 代码块类型 | 用途 | 前端行为 |
+|---|---|---|
+| `` ```chunk-pattern `` | 分块分隔符正则 | 渲染「✅ 应用为分块正则」按钮 |
+| `` ```field-regex `` | 字段提取正则（`字段: 正则` 格式，每行一个） | 每行渲染「✅ 应用到字段 xxx」按钮 |
+
+### 前端交互
+
+- 面板宽 380px，高 560px，从页面底部滑入
+- 支持 `Enter` 发送（`Shift+Enter` 换行），流式追加 token，打字动画
+- 「应用」按钮一键写入配置并触发实时预览更新：
+  - `applyChunkPattern(pattern)` → 更新 `#pattern-input`，如在 Step 3 则跳回 Step 2
+  - `applyFieldRegex(field, regex)` → 更新对应字段 DOM 和 `state.metaFields`，实时刷新正则预览
+- `restart()` 时自动清空对话历史
+
+---
+
+## 18. `hashlib` 缺失导入修复
+
+**文件**: `app/main.py`
+
+**日期**: 2026-03-18
+
+### 问题
+
+```
+NameError: name 'hashlib' is not defined
+```
+
+`confirm_index_endpoint` 中使用 `hashlib.md5(text.encode("utf-8")).hexdigest()[:32]` 计算内容 hash，但文件顶部缺少 `import hashlib`，导致每次调用 `/api/upload/confirm-index` 时 500 报错。
+
+### 解决方案
+
+在 `app/main.py` 顶部标准库导入区追加：
+
+```python
+import hashlib
+```

@@ -179,26 +179,38 @@ def disconnect_milvus():
         pass
 
 
+# 固定 schema 字段（不含 embedding）
+_SCHEMA_FIELDS = {"text", "source", "chunk_id", "chunk_type", "date", "company", "owner", "title", "tags"}
+
+
 def ensure_collection() -> Collection:
-    """确保 Milvus Collection 存在，不存在则创建"""
+    """确保 Milvus Collection 存在，不存在则创建。
+    开启 enable_dynamic_field=True，支持写入任意额外字段。
+    """
     if utility.has_collection(MILVUS_COLLECTION):
         col = Collection(MILVUS_COLLECTION)
         col.load()
         return col
 
-    # 定义 Schema
+    # 定义 Schema（固定字段 + dynamic field 支持额外自定义字段）
     fields = [
         FieldSchema(name="id",         dtype=DataType.INT64,         is_primary=True, auto_id=True),
         FieldSchema(name="text",        dtype=DataType.VARCHAR,       max_length=8192),
         FieldSchema(name="source",      dtype=DataType.VARCHAR,       max_length=256),
         FieldSchema(name="chunk_id",    dtype=DataType.VARCHAR,       max_length=64),
         FieldSchema(name="chunk_type",  dtype=DataType.VARCHAR,       max_length=32),
-        FieldSchema(name="date",        dtype=DataType.VARCHAR,       max_length=16),
+        FieldSchema(name="date",        dtype=DataType.VARCHAR,       max_length=64),
         FieldSchema(name="company",     dtype=DataType.VARCHAR,       max_length=256),
         FieldSchema(name="owner",       dtype=DataType.VARCHAR,       max_length=128),
+        FieldSchema(name="title",       dtype=DataType.VARCHAR,       max_length=512),
+        FieldSchema(name="tags",        dtype=DataType.VARCHAR,       max_length=512),
         FieldSchema(name="embedding",   dtype=DataType.FLOAT_VECTOR,  dim=EMBEDDING_DIMENSION),
     ]
-    schema = CollectionSchema(fields, description="CRM 知识库")
+    schema = CollectionSchema(
+        fields,
+        description="CRM 知识库",
+        enable_dynamic_field=True,  # 允许写入任意额外字段
+    )
     col = Collection(name=MILVUS_COLLECTION, schema=schema)
 
     # 创建 IVF_FLAT 索引
@@ -209,8 +221,21 @@ def ensure_collection() -> Collection:
     }
     col.create_index(field_name="embedding", index_params=index_params)
     col.load()
-    print(f"[Milvus] 创建集合 '{MILVUS_COLLECTION}' 成功")
+    print(f"[Milvus] 创建集合 '{MILVUS_COLLECTION}'（enable_dynamic_field=True）成功")
     return col
+
+
+def clear_index() -> bool:
+    """清空向量库：删除 Milvus Collection，不重建。
+    返回 True 表示确实删除了集合，False 表示集合本就不存在。
+    """
+    connect_milvus()
+    if utility.has_collection(MILVUS_COLLECTION):
+        utility.drop_collection(MILVUS_COLLECTION)
+        print(f"[Milvus] 已清空集合 '{MILVUS_COLLECTION}'")
+        return True
+    print(f"[Milvus] 集合 '{MILVUS_COLLECTION}' 不存在，无需清空")
+    return False
 
 
 def build_index(chunks: List[Dict[str, Any]]) -> int:
@@ -237,24 +262,41 @@ def build_index(chunks: List[Dict[str, Any]]) -> int:
             return s
         return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
-    texts       = [truncate_to_bytes(c["text"], MAX_BYTES)       for c in chunks]
-    sources     = [c.get("source", "")                           for c in chunks]
-    chunk_ids   = [str(c.get("chunk_id", i))                     for i, c in enumerate(chunks)]
-    chunk_types = [c.get("type", "activity")                     for c in chunks]
-    dates       = [c.get("date", "")                             for c in chunks]
-    companies   = [c.get("company", "")                          for c in chunks]
-    owners      = [c.get("owner", "")                            for c in chunks]
-
-    # 统计截断情况
     truncated = sum(1 for c in chunks if len(c["text"].encode("utf-8")) > MAX_BYTES)
     if truncated:
         print(f"  [警告] {truncated} 个片段超过 {MAX_BYTES} 字节，已截断")
 
-    print(f"[向量化] 开始向量化 {len(texts)} 个片段...")
+    print(f"[向量化] 开始向量化 {len(chunks)} 个片段...")
+    texts = [truncate_to_bytes(c["text"], MAX_BYTES) for c in chunks]
     embeddings = embed_texts(texts)
 
-    # 写入 Milvus
-    col.insert([texts, sources, chunk_ids, chunk_types, dates, companies, owners, embeddings])
+    # 构建行列表（每行为 dict，dynamic field 自动处理额外字段）
+    rows = []
+    for i, c in enumerate(chunks):
+        row: Dict[str, Any] = {
+            "text":       truncate_to_bytes(c["text"], MAX_BYTES),
+            "source":     str(c.get("source", ""))[:256],
+            "chunk_id":   str(c.get("chunk_id", i))[:64],
+            "chunk_type": str(c.get("type", "activity"))[:32],
+            "date":       str(c.get("date", ""))[:64],
+            "company":    str(c.get("company", ""))[:256],
+            "owner":      str(c.get("owner", ""))[:128],
+            "title":      str(c.get("title", ""))[:512],
+            "tags":       str(c.get("tags", ""))[:512],
+            "embedding":  embeddings[i],
+        }
+        # 额外自定义字段（非固定 schema 字段）写入 dynamic field
+        for k, v in c.items():
+            if k not in _SCHEMA_FIELDS and k not in ("text", "type", "embedding"):
+                row[k] = str(v)[:512] if v is not None else ""
+        rows.append(row)
+
+    # 分批写入 Milvus（避免 gRPC 64MB 消息上限）
+    INSERT_BATCH = 500
+    for b in range(0, len(rows), INSERT_BATCH):
+        col.insert(rows[b: b + INSERT_BATCH])
+        done = min(b + INSERT_BATCH, len(rows))
+        print(f"  [Milvus] 已写入 {done}/{len(rows)} 条")
     col.flush()
 
     # 摘要向量检索：生成摘要并追加写入
@@ -262,54 +304,144 @@ def build_index(chunks: List[Dict[str, Any]]) -> int:
         from app.document_loader import generate_summaries
         summary_chunks = generate_summaries(chunks)
         if summary_chunks:
-            s_texts       = [truncate_to_bytes(c["text"], MAX_BYTES) for c in summary_chunks]
-            s_sources     = [c.get("source", "")                     for c in summary_chunks]
-            s_chunk_ids   = [str(c.get("chunk_id", ""))              for c in summary_chunks]
-            s_chunk_types = [c.get("type", "summary")                for c in summary_chunks]
-            s_dates       = [c.get("date", "")                       for c in summary_chunks]
-            s_companies   = [c.get("company", "")                    for c in summary_chunks]
-            s_owners      = [c.get("owner", "")                      for c in summary_chunks]
-
+            s_texts = [truncate_to_bytes(c["text"], MAX_BYTES) for c in summary_chunks]
             print(f"[向量化] 开始向量化 {len(s_texts)} 条摘要...")
             s_embeddings = embed_texts(s_texts)
-            col.insert([s_texts, s_sources, s_chunk_ids, s_chunk_types, s_dates, s_companies, s_owners, s_embeddings])
+            s_rows = []
+            for j, c in enumerate(summary_chunks):
+                s_row: Dict[str, Any] = {
+                    "text":       truncate_to_bytes(c["text"], MAX_BYTES),
+                    "source":     str(c.get("source", ""))[:256],
+                    "chunk_id":   str(c.get("chunk_id", ""))[:64],
+                    "chunk_type": str(c.get("type", "summary"))[:32],
+                    "date":       str(c.get("date", ""))[:64],
+                    "company":    str(c.get("company", ""))[:256],
+                    "owner":      str(c.get("owner", ""))[:128],
+                    "title":      str(c.get("title", ""))[:512],
+                    "tags":       str(c.get("tags", ""))[:512],
+                    "embedding":  s_embeddings[j],
+                }
+                for k, v in c.items():
+                    if k not in _SCHEMA_FIELDS and k not in ("text", "type", "embedding"):
+                        s_row[k] = str(v)[:512] if v is not None else ""
+                s_rows.append(s_row)
+            for b in range(0, len(s_rows), INSERT_BATCH):
+                col.insert(s_rows[b: b + INSERT_BATCH])
             col.flush()
-            print(f"[Milvus] 追加写入 {len(s_texts)} 条摘要记录")
+            print(f"[Milvus] 追加写入 {len(s_rows)} 条摘要记录")
 
     count = col.num_entities
     print(f"[Milvus] 写入完成，集合共 {count} 条记录")
     return count
 
 
-def get_distinct_values(field: str) -> List[str]:
+def insert_chunks(chunks: List[Dict[str, Any]]) -> int:
     """
-    从 Milvus 全量遍历，返回某个字段的所有去重非空值。
-    适用于 company / owner 等元数据字段的统计查询。
+    增量插入 chunks 到 Milvus（不清空现有数据）。
+    支持固定 schema 字段（date/company/owner/title/tags）及任意自定义字段（via dynamic field）。
+    返回实际写入条数。
     """
     connect_milvus()
     col = ensure_collection()
-    total = col.num_entities
-    if total == 0:
+
+    # ── 去重：查询 Milvus 中已存在的 chunk_id，跳过重复，节省 embedding token ──
+    all_ids = [str(c.get("chunk_id", "")) for c in chunks]
+    existing_ids: set = set()
+    QUERY_BATCH = 200
+    for bi in range(0, len(all_ids), QUERY_BATCH):
+        batch = [cid for cid in all_ids[bi: bi + QUERY_BATCH] if cid]
+        if not batch:
+            continue
+        expr = "chunk_id in [" + ", ".join(f'"{cid}"' for cid in batch) + "]"
+        try:
+            rows = col.query(expr=expr, output_fields=["chunk_id"], limit=len(batch))
+            for r in rows:
+                existing_ids.add(r["chunk_id"])
+        except Exception as e:
+            print(f"  [去重] 查询失败（跳过去重）: {e}")
+
+    new_chunks = [c for c in chunks if str(c.get("chunk_id", "")) not in existing_ids]
+    skipped = len(chunks) - len(new_chunks)
+    if skipped:
+        print(f"  [去重] 跳过 {skipped} 条已存在，新增 {len(new_chunks)} 条")
+    if not new_chunks:
+        print("[insert_chunks] 全部重复，跳过写入")
+        return 0
+    chunks = new_chunks
+    # ─────────────────────────────────────────────────────────────────────────
+
+    MAX_BYTES = 8000
+
+    def truncate_to_bytes(s: str, max_bytes: int) -> str:
+        encoded = s.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return s
+        return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+    truncated = sum(1 for c in chunks if len(c["text"].encode("utf-8")) > MAX_BYTES)
+    if truncated:
+        print(f"  [警告] {truncated} 个片段超过 {MAX_BYTES} 字节，已截断")
+
+    print(f"[向量化] 增量写入 {len(chunks)} 个片段...")
+    texts = [truncate_to_bytes(c["text"], MAX_BYTES) for c in chunks]
+    embeddings = embed_texts(texts)
+
+    rows = []
+    for i, c in enumerate(chunks):
+        row: Dict[str, Any] = {
+            "text":       truncate_to_bytes(c["text"], MAX_BYTES),
+            "source":     str(c.get("source", ""))[:256],
+            "chunk_id":   str(c.get("chunk_id", i))[:64],
+            "chunk_type": str(c.get("type", "uploaded"))[:32],
+            "date":       str(c.get("date", ""))[:64],
+            "company":    str(c.get("company", ""))[:256],
+            "owner":      str(c.get("owner", ""))[:128],
+            "title":      str(c.get("title", ""))[:512],
+            "tags":       str(c.get("tags", ""))[:512],
+            "embedding":  embeddings[i],
+        }
+        # 额外自定义字段写入 dynamic field
+        for k, v in c.items():
+            if k not in _SCHEMA_FIELDS and k not in ("text", "type", "embedding"):
+                row[k] = str(v)[:512] if v is not None else ""
+        rows.append(row)
+
+    # 分批写入，避免 gRPC 64MB 消息上限
+    INSERT_BATCH = 500
+    for b in range(0, len(rows), INSERT_BATCH):
+        col.insert(rows[b: b + INSERT_BATCH])
+        done = min(b + INSERT_BATCH, len(rows))
+        print(f"  [Milvus] 已写入 {done}/{len(rows)} 条")
+    col.flush()
+    print(f"[Milvus] 增量写入完成，共 {len(rows)} 条")
+    return len(rows)
+
+
+def get_distinct_values(field: str) -> List[str]:
+    """
+    从 Milvus 全量遍历，返回某个字段的所有去重非空值。
+    使用 query_iterator 避免 Milvus offset+limit ≤ 16384 的限制。
+    """
+    connect_milvus()
+    col = ensure_collection()
+    if col.num_entities == 0:
         return []
 
-    PAGE = 1000  # 每次分页拉取数量（Milvus query limit 上限 16384，保守取 1000）
     seen: set = set()
-    offset = 0
-
-    while offset < total:
-        rows = col.query(
-            expr=f"{field} != ''",
-            output_fields=[field],
-            limit=PAGE,
-            offset=offset,
-        )
-        if not rows:
+    iterator = col.query_iterator(
+        expr=f"{field} != ''",
+        output_fields=[field],
+        batch_size=1000,
+    )
+    while True:
+        batch = iterator.next()
+        if not batch:
+            iterator.close()
             break
-        for row in rows:
+        for row in batch:
             val = row.get(field, "").strip()
             if val:
                 seen.add(val)
-        offset += PAGE
 
     return sorted(seen)
 
@@ -344,24 +476,21 @@ def get_field_activity_counts(field: str, top_n: int = 0) -> List[Dict[str, Any]
     if total == 0:
         return []
 
-    PAGE = 1000
     count_map: Dict[str, int] = {}
-    offset = 0
-
-    while offset < total:
-        rows = col.query(
-            expr=f"{field} != ''",
-            output_fields=[field],
-            limit=PAGE,
-            offset=offset,
-        )
-        if not rows:
+    iterator = col.query_iterator(
+        expr=f"{field} != ''",
+        output_fields=[field],
+        batch_size=1000,
+    )
+    while True:
+        batch = iterator.next()
+        if not batch:
+            iterator.close()
             break
-        for row in rows:
+        for row in batch:
             val = row.get(field, "").strip()
             if val:
                 count_map[val] = count_map.get(val, 0) + 1
-        offset += PAGE
 
     sorted_list = sorted(count_map.items(), key=lambda x: x[1], reverse=True)
     result = [{"value": v, "count": c} for v, c in sorted_list]

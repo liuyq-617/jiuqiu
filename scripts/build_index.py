@@ -29,8 +29,10 @@ def main():
                 print(f"  - {f.name}")
             data_path = BASE_DIR.parent
         else:
-            print("\n[错误] 未找到任何 markdown 文件，请将文档放入 crm_kb/data/ 目录")
-            sys.exit(1)
+            print("\n[提示] 暂无 markdown 文件，跳过索引构建")
+            print("  请将文档放入 crm_kb/data/ 目录，或访问 http://localhost:8000/upload 上传")
+            print("  上传后执行 python3 scripts/build_index.py 重建索引")
+            sys.exit(0)
 
     print(f"\n[步骤 1/3] 加载并分割文档...")
     chunks = load_and_split(data_path)
