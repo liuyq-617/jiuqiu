@@ -127,6 +127,10 @@ def _parse_date_range(question: str) -> Tuple[str, str]:
         # 最近一个月
         (r'最近\s*[1一]个?月|最近一个月',
          lambda m: (str(today - timedelta(30)), str(today)), False),
+        # 最近（无具体时长兜底，默认近 30 天）
+        # ⚠ 必须放最后，优先级最低，避免遮盖上方更具体的模式
+        (r'最近',
+         lambda m: (str(today - timedelta(days=30)), str(today)), False),
     ]
 
     for pat, fn, needs_m in patterns:
@@ -433,11 +437,17 @@ def build_context(hits: List[Dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
-def build_messages(question: str, context: str) -> List[Dict[str, str]]:
-    """构建发送给 GPT 的消息列表"""
+def build_messages(question: str, context: str, sort_by: str = "relevance") -> List[Dict[str, str]]:
+    """构建发送给 GPT 的消息列表。
+    sort_by: 'relevance'（向量相似度） | 'date'（元数据日期降序）
+    """
+    if sort_by == "date":
+        sort_note = "已按日期降序排列（最新记录在前）"
+    else:
+        sort_note = "已按相关性排序"
     user_content = f"""请根据以下 CRM 活动记录回答问题。
 
-=== CRM 活动记录（已按相关性排序）===
+=== CRM 活动记录（{sort_note}）===
 {context}
 
 === 用户问题 ===
@@ -495,6 +505,7 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
             else:
                 context = build_context(hits)
             sources = list({h["source"] for h in hits})
+            sort_by = "date"
         else:
             # 语义检索（普通 or Advanced RAG）
             if ADVANCED_RAG_ENABLED:
@@ -509,8 +520,9 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
                 logger.info(f"[answer] 摘要模式：已替换为 {len(hits)} 条原始记录")
             context = build_context(hits)
             sources = list({h["source"] for h in hits})
+            sort_by = "relevance"
 
-    messages = build_messages(question, context)
+    messages = build_messages(question, context, sort_by=sort_by)
 
     url = _chat_url()
     payload = _build_payload(messages, stream=False)
@@ -611,6 +623,7 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
             else:
                 context = build_context(hits)
             sources = list({h["source"] for h in hits})
+            sort_by = "date"
         else:
             # --- 语义检索（普通 or Advanced RAG）---
             try:
@@ -630,12 +643,13 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
                 logger.info(f"[stream] 摘要模式：已替换为 {len(hits)} 条原始记录")
             sources = list({h["source"] for h in hits})
             context = build_context(hits)
+            sort_by = "relevance"
 
     # --- 2. 先推送来源信息 ---
     yield f"data: {json.dumps({'type': 'sources', 'sources': sources, 'hits': hits}, ensure_ascii=False)}\n\n"
 
     # --- 3. 构建 Prompt ---
-    messages = build_messages(question, context)
+    messages = build_messages(question, context, sort_by=sort_by)
     url      = _chat_url()
     payload  = _build_payload(messages, stream=True)
 
