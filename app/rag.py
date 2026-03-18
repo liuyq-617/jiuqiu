@@ -12,62 +12,13 @@ from typing import List, Dict, Any, Iterator, Optional, Tuple
 import httpx
 
 from app.config import (
-    CHAT_API_KEY, CHAT_BASE_URL, OPENAI_CHAT_MODEL, TOP_K, CHAT_API_MODE,
+    OPENAI_CHAT_MODEL, TOP_K, CHAT_API_MODE,
     ADVANCED_RAG_ENABLED, SUMMARY_RAG_ENABLED,
 )
 from app.vector_store import search, get_aggregate_stats, query_by_metadata, get_distinct_values, get_field_activity_counts, fetch_originals
 from app.advanced_rag import advanced_retrieve
 
 logger = logging.getLogger("crm_rag")
-
-# ========== Chat API 工具 ==========
-
-def _chat_url() -> str:
-    base = CHAT_BASE_URL.rstrip("/")
-    if not base.endswith("/v1"):
-        base = base + "/v1"
-    if CHAT_API_MODE == "responses":
-        return base + "/responses"
-    return base + "/chat/completions"
-
-
-def _build_payload(messages: list, stream: bool) -> dict:
-    """根据 CHAT_API_MODE 构建请求体，兼容 completions 和 responses 两种格式"""
-    if CHAT_API_MODE == "responses":
-        # OpenAI Responses API: messages -> input，system 提取为 instructions
-        system_text = ""
-        input_msgs = []
-        for m in messages:
-            if m["role"] == "system":
-                system_text = m["content"]
-            else:
-                input_msgs.append({"role": m["role"], "content": m["content"]})
-        payload = {
-            "model": OPENAI_CHAT_MODEL,
-            "input": input_msgs,
-            "temperature": 0.1,
-            "max_output_tokens": 2048,
-            "stream": stream,
-        }
-        if system_text:
-            payload["instructions"] = system_text
-        return payload
-    else:
-        # 标准 Chat Completions API
-        return {
-            "model": OPENAI_CHAT_MODEL,
-            "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": 2048,
-            "stream": stream,
-        }
-
-
-def _chat_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {CHAT_API_KEY}",
-        "Content-Type": "application/json",
-    }
 
 
 # ========== 元数据过滤：日期解析 ==========
@@ -162,17 +113,12 @@ def _last_month_range(today: date) -> Tuple[str, str]:
 
 
 # ========== 元数据过滤：负责人识别 ==========
-_owners_cache: Optional[List[str]] = None
+from app.cache import metadata_cache
 
 
 def _get_owners() -> List[str]:
-    global _owners_cache
-    if _owners_cache is None:
-        try:
-            _owners_cache = get_distinct_values("owner")
-        except Exception:
-            _owners_cache = []
-    return _owners_cache
+    """获取所有负责人列表（带缓存）"""
+    return metadata_cache.get("owners", lambda: get_distinct_values("owner"))
 
 
 def _extract_owner(question: str) -> str:
@@ -229,20 +175,53 @@ def _is_evaluation_question(question: str) -> bool:
 
 def _build_evaluation_context(question: str, per_owner_limit: int = 60) -> tuple:
     """
-    为多人评价问题构建上下文：遍历所有负责人，分别拉取活动明细。
+    为多人评价问题构建上下文：批量查询所有负责人的活动明细。
     返回 (context_str, sources)
     """
+    from app.vector_store import connect_milvus, ensure_collection
+
     owners = _get_owners()
     if not owners:
         return "（知识库中未找到任何负责人记录）", []
 
-    logger.info(f"[evaluation] 开始逐一拉取 {len(owners)} 位负责人的活动记录")
+    logger.info(f"[evaluation] 批量查询 {len(owners)} 位负责人的活动记录")
+
+    # 修复 N+1 查询：使用单次 Milvus 查询获取所有负责人的数据
+    connect_milvus()
+    col = ensure_collection()
+
+    # 构建 OR 表达式：owner == "A" or owner == "B" or ...
+    owner_conditions = " or ".join([f'owner == "{o}"' for o in owners])
+    expr = f"({owner_conditions})"
+
+    try:
+        all_hits = col.query(
+            expr=expr,
+            output_fields=["text", "source", "date", "company", "owner", "title"],
+            limit=per_owner_limit * len(owners)
+        )
+        logger.info(f"[evaluation] 批量查询返回 {len(all_hits)} 条记录")
+    except Exception as e:
+        logger.error(f"[evaluation] 批量查询失败: {e}")
+        all_hits = []
+
+    # 按负责人分组
+    hits_by_owner = {}
+    for hit in all_hits:
+        owner = hit.get("owner", "")
+        if owner not in hits_by_owner:
+            hits_by_owner[owner] = []
+        if len(hits_by_owner[owner]) < per_owner_limit:
+            hits_by_owner[owner].append(hit)
+
+    # 构建上下文
     parts = []
     sources = set()
 
     for owner in owners:
-        hits = query_by_metadata(owner=owner, limit=per_owner_limit)
+        hits = hits_by_owner.get(owner, [])
         logger.info(f"[evaluation] {owner}: 共 {len(hits)} 条记录")
+
         if not hits:
             parts.append(f"\n### 负责人：{owner}\n（无活动记录）\n")
             continue
@@ -397,23 +376,32 @@ def _build_aggregate_context(question: str) -> tuple:
 
 
 # ========== System Prompt ==========
-SYSTEM_PROMPT = """你是一个专业的 CRM 业务助手，拥有公司近期客户跟进活动的完整知识库。
-你的任务是根据提供的 CRM 活动记录，准确、深入地回答用户问题。
+SYSTEM_PROMPT = """你是一个资深的 CRM 业务分析专家，拥有公司客户跟进活动的深度知识库。你的目标是协助团队洞察客户状态、评估销售表现并提供决策支持。
 
-回答规范：
-1. **信息提取**：直接基于检索到的上下文内容回答，不要编造不存在的信息
-2. **推理分析**：可以基于活动记录进行合理的分析、总结和评价
-   - 例如：根据跟进频率、客户数量、成交情况等推断工作表现
-   - 例如：根据活动内容分析工作风格、优势和不足
-3. **评价维度**：当用户要求用特定词汇或维度评价时，基于实际记录灵活运用
-   - 理解用户的评价语境（如网络用语、俚语等）
-   - 结合活动记录的客观数据给出合理评价
-4. **缺失信息**：仅当完全没有相关记录时，才告知"知识库中未找到相关记录"
-   - 如果有活动记录但缺少某些具体信息（如绩效指标），说明"记录中未包含该信息，但可基于活动情况分析..."
-5. **表达方式**：
-   - 涉及具体客户、日期、负责人时，精确引用原文
-   - 进行分析评价时，清晰说明依据和推理过程
-   - 回答使用中文，结构清晰，如有多个相关记录用编号列举
+## 🛠 核心任务
+根据检索到的 CRM 活动记录，提供准确、具有业务深度且逻辑严密的回答。
+
+## 📋 回答规范
+1. **信息准度（Grounding）：**
+   - 严禁幻觉。直接引用上下文内容，涉及具体日期、金额、负责人和客户名时需保持 100% 精确。
+   - 涉及多条活动记录时，按时间倒序或逻辑分类（如：技术维、商务维）编号呈现。
+
+2. **多维深度分析：**
+   - **趋势识别：** 识别客户热度的升温或降温，对比历史记录分析当前风险。
+   - **工作评估：** 结合跟进频率、反馈深度、解决问题的速度，评价负责人的执行力和客户把控力。
+   - **业务洞察：** 尝试识别记录中隐藏的客户痛点、竞争对手动态或决策链的关键人物。
+
+3. **评价与语境：**
+   - 灵活响应用户的评价需求。若用户使用非正式用语（如“这单稳吗？”、“最近状态如何？”），应将其转化为业务维度的考量（如：成交概率分析、工作饱和度评价）进行回答。
+
+4. **异常与缺失处理：**
+   - 发现关键信息缺失（如：缺少关键人联系方式、长期未跟进）时，主动指出该风险点。
+   - 若知识库完全无记录，礼貌告知；若记录零散，应基于现有碎片进行“现状还原”并说明局限性。
+
+5. **表达风格：**
+   - **专业、客观、洞察力强。**
+   - 结构：[核心结论] -> [基于事实的详细分析] -> [潜在风险/行动建议（可选）]。
+   - 使用中文，确保排版利于在移动端或仪表盘阅读。
 """
 
 
@@ -524,27 +512,16 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
 
     messages = build_messages(question, context, sort_by=sort_by)
 
-    url = _chat_url()
-    payload = _build_payload(messages, stream=False)
+    # 使用 ChatClient 替代重复代码
+    from app.chat_client import get_chat_client
+    client = get_chat_client()
 
-    logger.info(f"[answer] 调用 Chat API: {url}  model={OPENAI_CHAT_MODEL}  mode={CHAT_API_MODE}")
     try:
-        resp = httpx.post(url, headers=_chat_headers(), json=payload, timeout=120)
-        resp.raise_for_status()
-        data = resp.json()
+        data = client.complete(messages, timeout=120)
+        answer_text = client.extract_answer(data)
     except httpx.HTTPStatusError as e:
         logger.error(f"[answer] Chat API HTTP 错误 {e.response.status_code}: {e.response.text}")
         raise RuntimeError(f"Chat API 请求失败 {e.response.status_code}: {e.response.text[:200]}") from e
-
-    # 兼容两种响应格式
-    if CHAT_API_MODE == "responses":
-        try:
-            answer_text = data["output"][0]["content"][0]["text"]
-        except (KeyError, IndexError):
-            logger.error(f"[answer] Responses API 响应格式异常: {json.dumps(data, ensure_ascii=False)[:300]}")
-            raise RuntimeError(f"Responses API 响应格式异常")
-    else:
-        answer_text = data["choices"][0]["message"]["content"]
 
     usage = data.get("usage", {})
     logger.info(f"[answer] 完成，usage={usage}")
@@ -648,69 +625,56 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
     # --- 2. 先推送来源信息 ---
     yield f"data: {json.dumps({'type': 'sources', 'sources': sources, 'hits': hits}, ensure_ascii=False)}\n\n"
 
-    # --- 3. 构建 Prompt ---
+    # --- 3. 构建 Prompt 并流式调用 ---
     messages = build_messages(question, context, sort_by=sort_by)
-    url      = _chat_url()
-    payload  = _build_payload(messages, stream=True)
 
-    logger.info(f"[stream] 调用 Chat API: {url}  mode={CHAT_API_MODE}")
+    from app.chat_client import get_chat_client
+    client = get_chat_client()
+
+    logger.info(f"[stream] 调用 Chat API 流式接口")
 
     # --- 4. 流式请求 ---
     token_count = 0
     try:
-        with httpx.stream(
-            "POST", url,
-            headers=_chat_headers(),
-            json=payload,
-            timeout=120,
-        ) as resp:
-            if resp.status_code != 200:
-                body = resp.read().decode("utf-8", errors="ignore")
-                logger.error(f"[stream] Chat API HTTP {resp.status_code}: {body[:300]}")
-                yield f"data: {json.dumps({'type': 'error', 'content': f'Chat API 错误 {resp.status_code}: {body[:200]}'}, ensure_ascii=False)}\n\n"
-                return
+        for sse_line in client.stream(messages, timeout=120):
+            # sse_line 格式: "data: <json>\n\n"
+            line = sse_line.strip()
+            if not line or not line.startswith("data:"):
+                continue
 
-            buffer = ""
-            for raw_line in resp.iter_lines():
-                line = raw_line.strip()
-                if not line:
-                    continue
-                if not line.startswith("data:"):
-                    continue
+            data_str = line[5:].strip()
+            if data_str == "[DONE]":
+                logger.info(f"[stream] [DONE] 收到，共 {token_count} 个 token")
+                break
 
-                data_str = line[5:].strip()
-                if data_str == "[DONE]":
-                    logger.info(f"[stream] [DONE] 收到，共 {token_count} 个 token")
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                logger.warning(f"[stream] 无法解析行: {data_str[:100]}")
+                continue
+
+            # 提取 token 内容，兼容两种格式
+            content = None
+            if CHAT_API_MODE == "responses":
+                chunk_type = chunk.get("type", "")
+                if chunk_type == "response.output_text.delta":
+                    content = chunk.get("delta", "")
+                elif chunk_type in ("response.completed", "response.done"):
+                    logger.info(f"[stream] {chunk_type}，共 {token_count} 个 token")
                     break
+                elif chunk_type == "error":
+                    err_msg = chunk.get("message", str(chunk))
+                    logger.error(f"[stream] API error 事件: {err_msg}")
+                    yield f"data: {json.dumps({'type': 'error', 'content': err_msg}, ensure_ascii=False)}\n\n"
+                    return
+            else:
+                choices = chunk.get("choices", [])
+                if choices:
+                    content = choices[0].get("delta", {}).get("content")
 
-                try:
-                    chunk = json.loads(data_str)
-                except json.JSONDecodeError:
-                    logger.warning(f"[stream] 无法解析行: {data_str[:100]}")
-                    continue
-
-                # 提取 token 内容，兼容两种格式
-                content = None
-                if CHAT_API_MODE == "responses":
-                    chunk_type = chunk.get("type", "")
-                    if chunk_type == "response.output_text.delta":
-                        content = chunk.get("delta", "")
-                    elif chunk_type in ("response.completed", "response.done"):
-                        logger.info(f"[stream] {chunk_type}，共 {token_count} 个 token")
-                        break
-                    elif chunk_type == "error":
-                        err_msg = chunk.get("message", str(chunk))
-                        logger.error(f"[stream] API error 事件: {err_msg}")
-                        yield f"data: {json.dumps({'type': 'error', 'content': err_msg}, ensure_ascii=False)}\n\n"
-                        return
-                else:
-                    choices = chunk.get("choices", [])
-                    if choices:
-                        content = choices[0].get("delta", {}).get("content")
-
-                if content:
-                    token_count += 1
-                    yield f"data: {json.dumps({'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
+            if content:
+                token_count += 1
+                yield f"data: {json.dumps({'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
 
     except httpx.TimeoutException:
         logger.error("[stream] Chat API 请求超时")

@@ -238,18 +238,34 @@ def clear_index() -> bool:
     return False
 
 
-def build_index(chunks: List[Dict[str, Any]]) -> int:
+def build_index(chunks: List[Dict[str, Any]], force: bool = True) -> int:
     """
     将文档片段向量化并写入 Milvus
-    如果集合已存在，先删除重建（全量更新）
+    force=True（默认）：先删除旧集合再全量重建
+    force=False：若集合已存在且有数据则跳过，适合启动时调用
     返回写入的条数
     """
+    from app.cache import metadata_cache
+
     connect_milvus()
+
+    # force=False 时：若集合已有数据则跳过重建
+    if not force and utility.has_collection(MILVUS_COLLECTION):
+        col = Collection(MILVUS_COLLECTION)
+        col.load()
+        existing = col.num_entities
+        if existing > 0:
+            print(f"[Milvus] 集合 '{MILVUS_COLLECTION}' 已有 {existing} 条记录，跳过重建")
+            print(f"  提示：如需强制重建，请运行 python3 scripts/build_index.py --force")
+            return existing
 
     # 删除旧集合（全量重建）
     if utility.has_collection(MILVUS_COLLECTION):
         utility.drop_collection(MILVUS_COLLECTION)
         print(f"[Milvus] 已删除旧集合 '{MILVUS_COLLECTION}'")
+
+    # 清除元数据缓存（因为数据已重建）
+    metadata_cache.invalidate()
 
     col = ensure_collection()
 
@@ -341,24 +357,32 @@ def insert_chunks(chunks: List[Dict[str, Any]]) -> int:
     支持固定 schema 字段（date/company/owner/title/tags）及任意自定义字段（via dynamic field）。
     返回实际写入条数。
     """
+    from app.cache import metadata_cache
+
     connect_milvus()
     col = ensure_collection()
 
-    # ── 去重：查询 Milvus 中已存在的 chunk_id，跳过重复，节省 embedding token ──
+    # ── 去重：使用 iterator 一次性获取所有已存在的 chunk_id，避免多次查询 ──
     all_ids = [str(c.get("chunk_id", "")) for c in chunks]
     existing_ids: set = set()
-    QUERY_BATCH = 200
-    for bi in range(0, len(all_ids), QUERY_BATCH):
-        batch = [cid for cid in all_ids[bi: bi + QUERY_BATCH] if cid]
-        if not batch:
-            continue
-        expr = "chunk_id in [" + ", ".join(f'"{cid}"' for cid in batch) + "]"
-        try:
-            rows = col.query(expr=expr, output_fields=["chunk_id"], limit=len(batch))
-            for r in rows:
-                existing_ids.add(r["chunk_id"])
-        except Exception as e:
-            print(f"  [去重] 查询失败（跳过去重）: {e}")
+
+    try:
+        # 使用 query_iterator 批量获取所有已存在的 chunk_id
+        iterator = col.query_iterator(
+            expr="chunk_id != ''",
+            output_fields=["chunk_id"],
+            batch_size=1000,
+        )
+        while True:
+            batch = iterator.next()
+            if not batch:
+                iterator.close()
+                break
+            for row in batch:
+                existing_ids.add(row.get("chunk_id", ""))
+        print(f"  [去重] 已加载 {len(existing_ids)} 个已存在的 chunk_id")
+    except Exception as e:
+        print(f"  [去重] 查询失败（跳过去重）: {e}")
 
     new_chunks = [c for c in chunks if str(c.get("chunk_id", "")) not in existing_ids]
     skipped = len(chunks) - len(new_chunks)
@@ -368,6 +392,9 @@ def insert_chunks(chunks: List[Dict[str, Any]]) -> int:
         print("[insert_chunks] 全部重复，跳过写入")
         return 0
     chunks = new_chunks
+
+    # 清除元数据缓存（因为新增了数据）
+    metadata_cache.invalidate()
     # ─────────────────────────────────────────────────────────────────────────
 
     MAX_BYTES = 8000
@@ -447,9 +474,11 @@ def get_distinct_values(field: str) -> List[str]:
 
 
 def get_aggregate_stats() -> Dict[str, Any]:
-    """返回知识库聚合统计：客户列表、负责人列表、总条数"""
-    companies = get_distinct_values("company")
-    owners = get_distinct_values("owner")
+    """返回知识库聚合统计：客户列表、负责人列表、总条数（带缓存）"""
+    from app.cache import metadata_cache
+
+    companies = metadata_cache.get("companies", lambda: get_distinct_values("company"))
+    owners = metadata_cache.get("owners", lambda: get_distinct_values("owner"))
     connect_milvus()
     col = ensure_collection()
     return {
