@@ -70,6 +70,23 @@ def init_db() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_qa_created ON qa_log(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS prompt_candidates (
+                id               TEXT PRIMARY KEY,
+                route            TEXT NOT NULL,
+                suggestion       TEXT NOT NULL,
+                sample_ids       TEXT DEFAULT '[]',
+                sample_count     INTEGER DEFAULT 0,
+                avg_score_before REAL DEFAULT NULL,
+                avg_score_after  REAL DEFAULT NULL,
+                status           TEXT DEFAULT 'pending',
+                created_at       TEXT NOT NULL,
+                reviewed_at      TEXT DEFAULT NULL,
+                review_note      TEXT DEFAULT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_pc_status
+                ON prompt_candidates(status, created_at DESC);
         """)
         # 兼容旧库：按需 ALTER TABLE 追加手动打分列
         existing = {row[1] for row in conn.execute("PRAGMA table_info(qa_log)").fetchall()}
@@ -325,3 +342,81 @@ def get_stats() -> dict:
             for r in rows
         ],
     }
+
+
+# ========== Prompt 候选管理 ==========
+
+def list_prompt_candidates(status: Optional[str] = None) -> list:
+    """
+    返回 prompt_candidates 表中的候选记录。
+    status 不传则返回全部；传 'pending'/'approved'/'rejected' 则按 status 过滤。
+    按 created_at DESC 排序。
+    """
+    with _db_lock, _get_conn() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM prompt_candidates WHERE status=? ORDER BY created_at DESC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM prompt_candidates ORDER BY created_at DESC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def save_prompt_candidate(
+    route: str,
+    suggestion: str,
+    sample_ids: list,
+    avg_score_before: Optional[float] = None,
+) -> str:
+    """
+    插入一条新的 prompt_candidate 记录（status='pending'），返回 UUID。
+    route: 路由类型（semantic/metadata_filter/aggregate/ranking/evaluation/industry_scenario）
+    suggestion: Meta-LLM 生成的完整候选 SYSTEM_PROMPT 文本
+    sample_ids: 触发本次优化的低分 QA 记录 ID 列表
+    avg_score_before: 这批样本的平均评分（用于对比优化效果）
+    """
+    cid = str(uuid.uuid4())
+    created_at = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _db_lock, _get_conn() as conn:
+        conn.execute(
+            """INSERT INTO prompt_candidates
+               (id, route, suggestion, sample_ids, sample_count,
+                avg_score_before, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)""",
+            (
+                cid,
+                route,
+                suggestion,
+                json.dumps(sample_ids, ensure_ascii=False),
+                len(sample_ids),
+                avg_score_before,
+                created_at,
+            ),
+        )
+    logger.info("[feedback] 新 prompt 候选已保存 id=%s route=%s samples=%d", cid, route, len(sample_ids))
+    return cid
+
+
+def review_prompt_candidate(
+    candidate_id: str,
+    action: str,       # 'approved' 或 'rejected'
+    note: str = "",
+) -> bool:
+    """
+    审核 Prompt 候选：设置 status='approved'/'rejected'，记录 reviewed_at 和备注。
+    返回 True 表示找到并更新了记录，False 表示记录不存在。
+    """
+    if action not in ("approved", "rejected"):
+        return False
+    reviewed_at = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _db_lock, _get_conn() as conn:
+        cur = conn.execute(
+            """UPDATE prompt_candidates
+               SET status=?, reviewed_at=?, review_note=?
+               WHERE id=?""",
+            (action, reviewed_at, note, candidate_id),
+        )
+        return cur.rowcount > 0
