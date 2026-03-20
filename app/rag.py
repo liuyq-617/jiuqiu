@@ -12,10 +12,10 @@ from typing import List, Dict, Any, Iterator, Optional, Tuple
 import httpx
 
 from app.config import (
-    OPENAI_CHAT_MODEL, TOP_K, CHAT_API_MODE,
+    CHAT_API_KEY, CHAT_BASE_URL, OPENAI_CHAT_MODEL, TOP_K, CHAT_API_MODE,
     ADVANCED_RAG_ENABLED, SUMMARY_RAG_ENABLED,
 )
-from app.vector_store import search, get_aggregate_stats, query_by_metadata, get_distinct_values, get_field_activity_counts, fetch_originals
+from app.vector_store import search, get_aggregate_stats, query_by_metadata, get_distinct_values, get_field_activity_counts, query_by_company_keyword, fetch_originals
 from app.advanced_rag import advanced_retrieve
 
 logger = logging.getLogger("crm_rag")
@@ -375,6 +375,125 @@ def _build_aggregate_context(question: str) -> tuple:
     return context, ["crm_activities_recent.md"]
 
 
+# ========== 行业场景汇总问题检测 ==========
+# 针对"某行业的应用场景/案例/如何/怎样/主要用途"类跨客户汇总问题
+# 需要通过 company 字段关键词过滤拉取全量相关记录，再由 LLM 汇总场景
+_INDUSTRY_SCENARIO_PATTERNS = [
+    r'(烟草|卷烟|石油|石化|化工|钢铁|电力|水务|矿山|医疗|金融|银行|交通|制造|新能源|汽车|半导体|光伏|风电).{0,10}'
+    r'(应用场景|应用案例|典型场景|使用场景|落地场景|项目场景|主要场景|常见场景|案例|如何应用|怎么.{0,4}用|主要应用|应用情况)',
+    r'(应用场景|应用案例|典型场景|使用场景).{0,10}'
+    r'(烟草|卷烟|石油|石化|化工|钢铁|电力|水务|矿山|医疗|金融|银行|交通|制造|新能源|汽车|半导体)',
+    r'在(烟草|卷烟|石油|石化|化工|钢铁|电力|水务|矿山|医疗|金融|银行|交通|制造|新能源|汽车|半导体|光伏|风电).{0,6}'
+    r'(的|行业|领域).{0,10}(场景|案例|应用|怎么用|如何|用途)',
+]
+_INDUSTRY_SCENARIO_RE = re.compile('|'.join(_INDUSTRY_SCENARIO_PATTERNS))
+
+# 行业关键词 -> company 过滤关键词映射
+_INDUSTRY_KEYWORD_MAP = {
+    '烟草': '烟',
+    '卷烟': '烟',
+    '石油': '石油',
+    '石化': '石化',
+    '化工': '化工',
+    '钢铁': '钢铁',
+    '电力': '电力',
+    '水务': '水务',
+    '矿山': '矿',
+    '医疗': '医',
+    '金融': '金融',
+    '银行': '银行',
+    '交通': '交通',
+    '制造': '',  # 制造业覆盖面太广，不做 company 过滤，走语义检索
+    '新能源': '新能源',
+    '汽车': '汽车',
+    '半导体': '半导体',
+    '光伏': '光伏',
+    '风电': '风电',
+}
+
+
+def _is_industry_scenario_question(question: str) -> bool:
+    """判断是否为行业场景汇总类问题（跨多个客户，需要行业维度召回）"""
+    return bool(_INDUSTRY_SCENARIO_RE.search(question))
+
+
+def _extract_industry_keyword(question: str) -> str:
+    """从问题中提取行业名称，返回对应的 company 过滤关键词"""
+    for industry, company_kw in _INDUSTRY_KEYWORD_MAP.items():
+        if industry in question:
+            return company_kw
+    return ""
+
+
+def _build_industry_scenario_context(question: str, limit: int = 300) -> tuple:
+    """
+    为行业场景汇总问题构建上下文：
+    1. 提取行业关键词，过滤对应客户记录
+    2. 按客户去重合并，尽量覆盖不同客户/场景
+    3. 返回 (context_str, sources)
+    """
+    company_kw = _extract_industry_keyword(question)
+    if not company_kw:
+        # 无法提取有效行业关键词，降级到语义检索
+        return None, None
+
+    hits = query_by_company_keyword(keyword=company_kw, limit=limit)
+    if not hits:
+        context = f'（知识库中未找到与"{company_kw}"相关的客户活动记录）'
+        return context, []
+
+    # 按客户分组，每个客户最多保留 5 条记录（避免单客户占满上下文）
+    company_records: Dict[str, List[Dict]] = {}
+    for h in hits:
+        company = h.get("company", "未知客户")
+        if company not in company_records:
+            company_records[company] = []
+        if len(company_records[company]) < 5:
+            company_records[company].append(h)
+
+    parts = [f"【行业客户活动记录汇总（共 {len(company_records)} 个客户，{len(hits)} 条记录）】\n"]
+    for company, records in company_records.items():
+        parts.append(f"\n#### 客户：{company}")
+        for r in records:
+            meta = f"[{r.get('date', '')}]"
+            if r.get('owner'):
+                meta += f" 负责人：{r['owner']}"
+            parts.append(f"{meta}\n{r['text']}")
+
+    context = "\n".join(parts)
+    sources = list({h["source"] for h in hits})
+    return context, sources
+
+
+_INDUSTRY_SCENARIO_SYSTEM_PROMPT = """你是一个专业的 CRM 业务助手，拥有公司近期客户跟进活动的完整知识库。
+你的任务是根据提供的多个行业客户的 CRM 活动记录，汇总归纳该行业的 TDengine 应用场景。
+
+回答规范：
+1. 聚焦提炼"应用场景/项目场景"，按场景类型分类汇总，不要逐条罗列每个客户
+2. 对同类场景进行合并归纳，提炼共性；对个性化场景单独列出
+3. 每个场景需说明：场景名称、具体需求描述、涉及的典型客户（1-2个举例）
+4. 如有"不适用场景"或特殊限制，在末尾单独标注
+5. 回答使用中文，结构清晰，分点列举
+6. 不要编造信息，严格基于记录内容汇总
+"""
+
+
+def build_industry_scenario_messages(question: str, context: str) -> List[Dict[str, str]]:
+    """为行业场景汇总问题构建专用 Prompt"""
+    user_content = f"""请根据以下 CRM 活动记录，汇总归纳 TDengine 在相关行业的应用场景。
+
+=== CRM 活动记录（按客户分组）===
+{context}
+
+=== 用户问题 ===
+{question}
+"""
+    return [
+        {"role": "system", "content": _INDUSTRY_SCENARIO_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+
 # ========== System Prompt ==========
 SYSTEM_PROMPT = """你是一个资深的 CRM 业务分析专家，拥有公司客户跟进活动的深度知识库。你的目标是协助团队洞察客户状态、评估销售表现并提供决策支持。
 
@@ -452,6 +571,8 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
     logger.info(f"[answer] 问题: {question}")
 
     # --- 路由优先级判断 ---
+    is_industry_scenario = False
+    sort_by = "relevance"
     if _is_ranking_question(question):
         # 活跃度/数量排名类：统计各实体activity记录数
         logger.info("[answer] 检测到活跃度排名问题，统计活动记录数量")
@@ -467,6 +588,22 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
         logger.info("[answer] 检测到聚合统计问题，使用全量元数据查询")
         context, sources = _build_aggregate_context(question)
         hits = []
+    elif _is_industry_scenario_question(question):
+        # 行业场景汇总类：按行业关键词过滤所有相关客户记录
+        logger.info("[answer] 检测到行业场景汇总问题，按行业关键词过滤客户记录")
+        ctx, srcs = _build_industry_scenario_context(question)
+        if ctx is not None:
+            context, sources, hits = ctx, srcs, []
+            is_industry_scenario = True
+        else:
+            # 降级：关键词提取失败，走语义检索
+            logger.info("[answer] 行业关键词提取失败，降级到语义检索")
+            if ADVANCED_RAG_ENABLED:
+                hits = advanced_retrieve(question, top_k=top_k)
+            else:
+                hits = search(question, top_k=top_k)
+            context = build_context(hits)
+            sources = list({h["source"] for h in hits})
     else:
         # 尝试提取元数据过滤器
         filters = extract_filters(question)
@@ -510,7 +647,10 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
             sources = list({h["source"] for h in hits})
             sort_by = "relevance"
 
-    messages = build_messages(question, context, sort_by=sort_by)
+    if is_industry_scenario:
+        messages = build_industry_scenario_messages(question, context)
+    else:
+        messages = build_messages(question, context, sort_by=sort_by)
 
     # 使用 ChatClient 替代重复代码
     from app.chat_client import get_chat_client
@@ -543,6 +683,8 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
     logger.info(f"[stream] 问题: {question}")
 
     # --- 路由判断 ---
+    is_industry_scenario = False
+    sort_by = "relevance"
     if _is_ranking_question(question):
         logger.info("[stream] 检测到活跃度排名问题，统计活动记录数量")
         try:
@@ -570,6 +712,25 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
         except Exception as e:
             logger.error(f"[stream] 聚合查询失败: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': f'聚合查询失败: {e}'}, ensure_ascii=False)}\n\n"
+            return
+    elif _is_industry_scenario_question(question):
+        logger.info("[stream] 检测到行业场景汇总问题，按行业关键词过滤客户记录")
+        try:
+            ctx, srcs = _build_industry_scenario_context(question)
+            if ctx is not None:
+                context, sources, hits = ctx, srcs, []
+                is_industry_scenario = True
+            else:
+                logger.info("[stream] 行业关键词提取失败，降级到语义检索")
+                if ADVANCED_RAG_ENABLED:
+                    hits = advanced_retrieve(question, top_k=top_k)
+                else:
+                    hits = search(question, top_k=top_k)
+                context = build_context(hits)
+                sources = list({h["source"] for h in hits})
+        except Exception as e:
+            logger.error(f"[stream] 行业场景查询失败: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'content': f'行业场景查询失败: {e}'}, ensure_ascii=False)}\n\n"
             return
     else:
         filters = extract_filters(question)
@@ -626,7 +787,10 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
     yield f"data: {json.dumps({'type': 'sources', 'sources': sources, 'hits': hits}, ensure_ascii=False)}\n\n"
 
     # --- 3. 构建 Prompt 并流式调用 ---
-    messages = build_messages(question, context, sort_by=sort_by)
+    if is_industry_scenario:
+        messages = build_industry_scenario_messages(question, context)
+    else:
+        messages = build_messages(question, context, sort_by=sort_by)
 
     from app.chat_client import get_chat_client
     client = get_chat_client()

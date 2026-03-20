@@ -582,6 +582,81 @@ def query_by_metadata(
     ]
 
 
+def query_by_company_keyword(
+    keyword: str,
+    owner: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """
+    按 company 字段关键词模糊匹配查询，适用于"某行业所有客户记录"检索。
+    例如：keyword="烟" 可匹配所有卷烟厂/烟草公司的记录。
+    优先返回 chunk_type=activity 的完整活动记录，去除重复父块。
+    """
+    connect_milvus()
+    col = ensure_collection()
+
+    escaped = keyword.replace("'", "\\'")
+    exprs = [f"company like '%{escaped}%'"]
+    if owner:
+        escaped_owner = owner.replace("'", "\\'")
+        exprs.append(f"owner like '%{escaped_owner}%'")
+    if date_from:
+        exprs.append(f"date >= '{date_from}'")
+    if date_to:
+        exprs.append(f"date <= '{date_to}'")
+
+    expr = " and ".join(exprs)
+
+    rows = col.query(
+        expr=expr,
+        output_fields=["text", "source", "chunk_id", "chunk_type", "date", "company", "owner"],
+        limit=limit,
+    )
+
+    # 优先保留 chunk_type=activity 的完整块；如果同一 chunk_id 有父子块，去重只保留父块
+    seen_chunk_ids: set = set()
+    result = []
+    # 先遍历父块
+    for r in sorted(rows, key=lambda x: x.get("date", ""), reverse=True):
+        ctype = r.get("chunk_type", "")
+        cid = r.get("chunk_id", "")
+        if ctype == "activity":
+            if cid not in seen_chunk_ids:
+                seen_chunk_ids.add(cid)
+                result.append({
+                    "text":       r.get("text", ""),
+                    "source":     r.get("source", ""),
+                    "chunk_id":   cid,
+                    "chunk_type": ctype,
+                    "date":       r.get("date", ""),
+                    "company":    r.get("company", ""),
+                    "owner":      r.get("owner", ""),
+                    "score":      1.0,
+                })
+    # 补充无父块的子块（chunk_type=activity_part，父 chunk_id 未被收录的）
+    for r in sorted(rows, key=lambda x: x.get("date", ""), reverse=True):
+        ctype = r.get("chunk_type", "")
+        cid = r.get("chunk_id", "")
+        if ctype == "activity_part":
+            parent_id = cid.split("_sub")[0] if "_sub" in cid else ""
+            if parent_id not in seen_chunk_ids and cid not in seen_chunk_ids:
+                seen_chunk_ids.add(cid)
+                result.append({
+                    "text":       r.get("text", ""),
+                    "source":     r.get("source", ""),
+                    "chunk_id":   cid,
+                    "chunk_type": ctype,
+                    "date":       r.get("date", ""),
+                    "company":    r.get("company", ""),
+                    "owner":      r.get("owner", ""),
+                    "score":      1.0,
+                })
+
+    return result
+
+
 def search(query: str, top_k: int = TOP_K, expr: str = "") -> List[Dict[str, Any]]:
     """
     相似度检索：将 query 向量化，在 Milvus 中检索最相关片段。
