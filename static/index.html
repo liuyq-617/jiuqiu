@@ -66,6 +66,18 @@
     .dot.online { background: #22c55e; }
     .dot.error  { background: #ef4444; }
 
+    .upload-link {
+      color: var(--primary);
+      text-decoration: none;
+      font-size: 14px;
+      padding: 8px 16px;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+    .upload-link:hover {
+      background: #eff6ff;
+    }
+
     /* ===== Main layout ===== */
     .layout {
       flex: 1;
@@ -339,9 +351,13 @@
       <div class="header-sub">基于 OpenAI + Milvus RAG</div>
     </div>
   </div>
-  <div id="status-badge">
-    <span class="dot" id="status-dot"></span>
-    <span id="status-text">检查中...</span>
+  <div style="display: flex; align-items: center; gap: 16px;">
+    <a href="/upload" class="upload-link">📁 文件上传</a>
+    <a href="/admin" class="upload-link">⚙️ 后台管理</a>
+    <div id="status-badge">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">检查中...</span>
+    </div>
   </div>
 </header>
 
@@ -387,6 +403,9 @@
       <h3>知识库管理</h3>
       <button id="rebuild-btn" onclick="rebuildIndex()">🔄 重建索引</button>
       <div id="rebuild-msg"></div>
+      <button id="mcp-btn" onclick="window.location.href='/static/mcp.html'" style="margin-top: 10px; width: 100%; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; color: var(--muted); transition: all .15s;">
+        🔌 MCP 数据源
+      </button>
     </div>
 
     <div class="card" id="quality-card">

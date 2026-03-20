@@ -29,7 +29,7 @@ from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 from lark_oapi.ws.client import Client as _LarkWSClient
 from lark_oapi.ws.model import ClientConfig
 
-from app.config import FEISHU_APP_ID, FEISHU_APP_SECRET
+from app.config import FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_BOT_ENABLED
 from app.rag import answer_stream
 
 
@@ -423,6 +423,10 @@ def start_ws_client() -> None:
     由 FastAPI lifespan 在应用启动时调用。
     """
     global _ws_thread
+
+    if not FEISHU_BOT_ENABLED:
+        logger.info("[feishu] 飞书机器人已禁用（FEISHU_BOT_ENABLED=false）")
+        return
 
     if not FEISHU_APP_ID or not FEISHU_APP_SECRET:
         logger.warning(

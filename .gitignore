@@ -14,8 +14,7 @@ build/
 venv/
 
 # ========== 数据文件（含业务数据，不应开源）==========
-data/embedding_cache.db
-data/chunks_preview.txt
+data/
 
 # ========== Milvus / Docker 持久化卷 ==========
 volumes/
@@ -35,3 +34,6 @@ volumes/
 # ========== OS ==========
 .DS_Store
 Thumbs.db
+
+# ========== 日志 ==========
+*.log

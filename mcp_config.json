@@ -1,0 +1,40 @@
+{
+  "mcp_sources": [
+    {
+      "name": "local_docs",
+      "type": "filesystem",
+      "enabled": false,
+      "path": "/path/to/documents",
+      "pattern": "**/*.md",
+      "description": "本地文件系统数据源示例"
+    },
+    {
+      "name": "crm_api",
+      "type": "http",
+      "enabled": false,
+      "url": "https://api.example.com/crm/activities",
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      },
+      "params": {},
+      "content_path": "data",
+      "text_field": "content",
+      "description": "HTTP API 数据源示例"
+    },
+    {
+      "name": "crm_database",
+      "type": "database",
+      "enabled": false,
+      "db_type": "mysql",
+      "host": "localhost",
+      "port": 3306,
+      "user": "root",
+      "password": "password",
+      "database": "crm",
+      "query": "SELECT * FROM activities WHERE created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)",
+      "text_field": "content",
+      "description": "MySQL 数据库数据源示例"
+    }
+  ]
+}

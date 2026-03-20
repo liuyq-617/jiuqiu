@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>后台管理 - CRM 知识库</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --danger: #dc2626;
+      --danger-hover: #b91c1c;
+      --success: #16a34a;
+      --warn: #d97706;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.04);
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+                   'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: #7c3aed;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; color: white;
+    }
+    .header-title { font-size: 17px; font-weight: 600; }
+    .header-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+    .nav-links { display: flex; gap: 8px; }
+    .nav-link {
+      color: var(--primary);
+      text-decoration: none;
+      font-size: 13px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+    .nav-link:hover { background: #eff6ff; }
+
+    /* ── Layout ── */
+    .container { max-width: 960px; margin: 0 auto; padding: 28px 24px; }
+
+    /* ── Stats Cards ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .stat-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      box-shadow: var(--shadow);
+      border-left: 4px solid transparent;
+    }
+    .stat-card.blue  { border-left-color: var(--primary); }
+    .stat-card.green { border-left-color: var(--success); }
+    .stat-card.orange{ border-left-color: var(--warn); }
+    .stat-card.purple{ border-left-color: #7c3aed; }
+    .stat-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
+    .stat-value { font-size: 28px; font-weight: 700; line-height: 1; }
+    .stat-sub   { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Section Card ── */
+    .section {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 28px;
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+    }
+    .section-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      gap: 12px;
+    }
+    .section-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+    .section-desc  { font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .section-icon  { font-size: 24px; flex-shrink: 0; }
+
+    /* ── Warning Banner ── */
+    .warn-banner {
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #92400e;
+      margin-bottom: 20px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    /* ── Confirm Row ── */
+    .confirm-row {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .confirm-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      user-select: none;
+    }
+    .confirm-check input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      accent-color: var(--danger);
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 10px 22px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-danger  { background: var(--danger);  color: white; }
+    .btn-danger:not(:disabled):hover  { background: var(--danger-hover); }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:not(:disabled):hover { background: var(--primary-hover); }
+    .btn-outline {
+      background: transparent;
+      border: 1.5px solid var(--border);
+      color: var(--text);
+    }
+    .btn-outline:not(:disabled):hover { background: var(--bg); border-color: var(--muted); }
+
+    /* ── Log Console ── */
+    .log-console {
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+      min-height: 180px;
+      max-height: 360px;
+      overflow-y: auto;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.7;
+      display: none;
+    }
+    .log-console.visible { display: block; }
+    .log-line { color: #94a3b8; }
+    .log-line.info  { color: #7dd3fc; }
+    .log-line.ok    { color: #86efac; }
+    .log-line.warn  { color: #fde68a; }
+    .log-line.error { color: #fca5a5; }
+
+    /* ── Status Badge ── */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-weight: 500;
+    }
+    .status-badge.running { background: #dbeafe; color: #1d4ed8; }
+    .status-badge.done    { background: #dcfce7; color: #15803d; }
+    .status-badge.error   { background: #fee2e2; color: #b91c1c; }
+    .dot-anim {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+
+    /* ── Divider ── */
+    hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+    /* ── Tag list ── */
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .tag {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="logo">⚙️</div>
+    <div>
+      <div class="header-title">后台管理</div>
+      <div class="header-sub">CRM 知识库管理控制台</div>
+    </div>
+  </div>
+  <nav class="nav-links">
+    <a href="/" class="nav-link">💬 问答</a>
+    <a href="/upload" class="nav-link">📤 上传文件</a>
+  </nav>
+</header>
+
+<div class="container">
+
+  <!-- Stats -->
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-card blue">
+      <div class="stat-label">向量片段总数</div>
+      <div class="stat-value" id="stat-chunks">—</div>
+      <div class="stat-sub">docs in Milvus</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">客户公司数</div>
+      <div class="stat-value" id="stat-companies">—</div>
+      <div class="stat-sub">distinct companies</div>
+    </div>
+    <div class="stat-card orange">
+      <div class="stat-label">负责人数</div>
+      <div class="stat-value" id="stat-owners">—</div>
+      <div class="stat-sub">distinct owners</div>
+    </div>
+    <div class="stat-card purple">
+      <div class="stat-label">集合名称</div>
+      <div class="stat-value" style="font-size:15px;padding-top:4px;" id="stat-collection">—</div>
+      <div class="stat-sub">Milvus collection</div>
+    </div>
+  </div>
+
+  <!-- 清空向量库 -->
+  <div class="section" id="section-clear">
+    <div class="section-header">
+      <div>
+        <div class="section-title">🗑️ 清空向量库</div>
+        <div class="section-desc">删除 Milvus 中的全部向量数据（Collection 将被彻底删除）。<br>此操作<strong>不可撤销</strong>，清空后需重新导入数据才能恢复问答功能。</div>
+      </div>
+    </div>
+
+    <div class="warn-banner">
+      ⚠️ <span>清空后，所有已索引的文档片段将永久丢失。请确保已备份原始数据文件，或已准备好重建所需的文档。</span>
+    </div>
+
+    <div class="confirm-row">
+      <label class="confirm-check">
+        <input type="checkbox" id="clear-confirm" onchange="updateClearBtn()" />
+        我已了解风险，确认清空向量库
+      </label>
+      <button class="btn btn-danger" id="clear-btn" disabled onclick="doClear()">
+        🗑️ 执行清空
+      </button>
+    </div>
+
+    <div id="clear-result" style="margin-top:14px;font-size:13px;display:none;"></div>
+  </div>
+
+  <!-- 重建索引 -->
+  <div class="section" id="section-rebuild">
+    <div class="section-header">
+      <div>
+        <div class="section-title">🔄 重建知识库索引</div>
+        <div class="section-desc">
+          从 <code>data/</code> 目录读取所有 Markdown 文档，全量重建向量索引。<br>
+          重建前会自动清空现有数据，整个过程会通过实时日志展示进度。
+        </div>
+      </div>
+    </div>
+
+    <div class="warn-banner">
+      ⚠️ <span>重建过程中，现有向量库将被先清空再重新写入，耗时取决于文档量与 Embedding API 速度，请勿关闭页面。</span>
+    </div>
+
+    <div class="confirm-row">
+      <label class="confirm-check">
+        <input type="checkbox" id="rebuild-confirm" onchange="updateRebuildBtn()" />
+        确认重建（将清空现有数据并重新索引）
+      </label>
+      <button class="btn btn-primary" id="rebuild-btn" disabled onclick="doRebuild()">
+        🔄 开始重建
+      </button>
+      <span id="rebuild-status"></span>
+    </div>
+
+    <div class="log-console" id="rebuild-log"></div>
+  </div>
+
+  <!-- 数据文件列表（快速入口） -->
+  <div class="section">
+    <div class="section-title" style="margin-bottom:12px;">📂 快速操作</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <a href="/upload" class="btn btn-outline">📤 上传新文档</a>
+      <button class="btn btn-outline" onclick="loadStats()">🔃 刷新统计</button>
+    </div>
+
+    <hr />
+
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">客户公司列表</div>
+    <div class="tag-list" id="company-list"><span style="color:var(--muted);font-size:12px;">加载中…</span></div>
+
+    <hr />
+
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">负责人列表</div>
+    <div class="tag-list" id="owner-list"><span style="color:var(--muted);font-size:12px;">加载中…</span></div>
+  </div>
+
+</div>
+
+<script>
+// ── helpers ──────────────────────────────────────────────────────────
+function updateClearBtn() {
+  document.getElementById('clear-btn').disabled =
+    !document.getElementById('clear-confirm').checked;
+}
+function updateRebuildBtn() {
+  document.getElementById('rebuild-btn').disabled =
+    !document.getElementById('rebuild-confirm').checked;
+}
+
+function setResult(el, msg, type /* ok | error | info */) {
+  el.style.display = 'block';
+  const colors = { ok: '#15803d', error: '#b91c1c', info: '#1d4ed8' };
+  el.style.color = colors[type] || '#64748b';
+  el.textContent = msg;
+}
+
+// ── Load Stats ────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const r = await fetch('/api/companies');
+    const d = await r.json();
+    if (!d.success) throw new Error(d.detail || '获取失败');
+
+    document.getElementById('stat-chunks').textContent =
+      (d.total_chunks || 0).toLocaleString();
+    document.getElementById('stat-companies').textContent =
+      (d.company_count || 0).toLocaleString();
+    document.getElementById('stat-owners').textContent =
+      (d.owner_count || 0).toLocaleString();
+
+    // collection name
+    const sr = await fetch('/api/stats');
+    const sd = await sr.json();
+    if (sd.success) {
+      document.getElementById('stat-collection').textContent = sd.collection || '—';
+    }
+
+    // tag lists
+    const companyList = document.getElementById('company-list');
+    companyList.innerHTML = '';
+    (d.companies || []).forEach(c => {
+      const t = document.createElement('span');
+      t.className = 'tag';
+      t.textContent = c;
+      companyList.appendChild(t);
+    });
+    if (!d.companies?.length) companyList.innerHTML = '<span style="color:var(--muted);font-size:12px;">（暂无数据）</span>';
+
+    const ownerList = document.getElementById('owner-list');
+    ownerList.innerHTML = '';
+    (d.owners || []).forEach(o => {
+      const t = document.createElement('span');
+      t.className = 'tag';
+      t.textContent = o;
+      ownerList.appendChild(t);
+    });
+    if (!d.owners?.length) ownerList.innerHTML = '<span style="color:var(--muted);font-size:12px;">（暂无数据）</span>';
+
+  } catch (e) {
+    document.getElementById('stat-chunks').textContent = '!';
+    console.error(e);
+  }
+}
+
+// ── Clear ─────────────────────────────────────────────────────────────
+async function doClear() {
+  const btn = document.getElementById('clear-btn');
+  const resultEl = document.getElementById('clear-result');
+  if (!document.getElementById('clear-confirm').checked) return;
+
+  if (!confirm('⚠️ 最后确认：确定要清空全部向量数据吗？此操作不可撤销！')) return;
+
+  btn.disabled = true;
+  btn.textContent = '清空中…';
+  setResult(resultEl, '正在执行清空操作…', 'info');
+
+  try {
+    const r = await fetch('/api/admin/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+
+    setResult(resultEl, `✅ ${d.message}`, 'ok');
+    document.getElementById('clear-confirm').checked = false;
+    updateClearBtn();
+    // 刷新统计
+    setTimeout(loadStats, 800);
+  } catch (e) {
+    setResult(resultEl, `❌ 清空失败：${e.message}`, 'error');
+    btn.disabled = false;
+  }
+
+  btn.textContent = '🗑️ 执行清空';
+}
+
+// ── Rebuild ───────────────────────────────────────────────────────────
+function doRebuild() {
+  if (!document.getElementById('rebuild-confirm').checked) return;
+
+  const btn     = document.getElementById('rebuild-btn');
+  const logEl   = document.getElementById('rebuild-log');
+  const statusEl= document.getElementById('rebuild-status');
+
+  btn.disabled = true;
+  logEl.innerHTML = '';
+  logEl.classList.add('visible');
+  statusEl.innerHTML = '<span class="status-badge running"><span class="dot-anim"></span>重建中…</span>';
+
+  const appendLog = (msg, cls = 'log-line') => {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = msg;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+
+  appendLog('[系统] 开始重建知识库索引，请稍候…', 'log-line info');
+
+  const es = new EventSource('/api/admin/rebuild/stream?confirm=true');
+  // EventSource 用 GET，但我们需要 POST；改用 fetch + ReadableStream
+
+  es.close(); // 关掉 EventSource，改用 fetch stream
+
+  fetch('/api/admin/rebuild/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: true }),
+  }).then(resp => {
+    if (!resp.ok) {
+      resp.json().then(d => {
+        appendLog(`[错误] ${d.detail || resp.statusText}`, 'log-line error');
+        statusEl.innerHTML = '<span class="status-badge error">❌ 失败</span>';
+        btn.disabled = false;
+      });
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    const pump = () => reader.read().then(({ done, value }) => {
+      if (done) return;
+      buf += decoder.decode(value, { stream: true });
+
+      const lines = buf.split('\n');
+      buf = lines.pop(); // 未完整的行留给下次
+
+      lines.forEach(line => {
+        line = line.trim();
+        if (!line.startsWith('data:')) return;
+        const jsonStr = line.slice(5).trim();
+        if (!jsonStr) return;
+        try {
+          const ev = JSON.parse(jsonStr);
+          if (ev.type === 'log') {
+            // 根据关键词给颜色
+            let cls = 'log-line';
+            if (ev.message.includes('错误') || ev.message.includes('失败') || ev.message.includes('Error'))
+              cls = 'log-line error';
+            else if (ev.message.includes('完成') || ev.message.includes('成功') || ev.message.includes('写入'))
+              cls = 'log-line ok';
+            else if (ev.message.includes('警告') || ev.message.includes('Warning'))
+              cls = 'log-line warn';
+            else if (ev.message.startsWith('['))
+              cls = 'log-line info';
+            appendLog(ev.message, cls);
+          } else if (ev.type === 'done') {
+            appendLog(
+              `\n✅ 重建完成！共切分 ${ev.chunk_count} 个片段，成功写入 ${ev.indexed_count} 条向量记录。`,
+              'log-line ok'
+            );
+            statusEl.innerHTML = `<span class="status-badge done">✅ 已完成（${ev.indexed_count} 条）</span>`;
+            document.getElementById('rebuild-confirm').checked = false;
+            updateRebuildBtn();
+            setTimeout(loadStats, 800);
+          } else if (ev.type === 'error') {
+            appendLog(`\n❌ 错误：${ev.detail}`, 'log-line error');
+            statusEl.innerHTML = '<span class="status-badge error">❌ 重建失败</span>';
+            btn.disabled = false;
+          }
+        } catch (_) {}
+      });
+
+      pump();
+    }).catch(err => {
+      appendLog(`[连接错误] ${err.message}`, 'log-line error');
+      statusEl.innerHTML = '<span class="status-badge error">❌ 连接中断</span>';
+      btn.disabled = false;
+    });
+
+    pump();
+  }).catch(err => {
+    appendLog(`[请求失败] ${err.message}`, 'log-line error');
+    statusEl.innerHTML = '<span class="status-badge error">❌ 请求失败</span>';
+    btn.disabled = false;
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+loadStats();
+</script>
+</body>
+</html>

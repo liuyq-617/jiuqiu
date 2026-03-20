@@ -55,10 +55,10 @@ echo ""
 echo "[步骤 2] 安装 Python 依赖..."
 pip3 install -r requirements.txt -q
 
-# ---------- 4. 构建索引 ----------
+# ---------- 4. 构建索引（可选，无文档时跳过）----------
 echo ""
 echo "[步骤 3] 构建知识库索引..."
-python3 scripts/build_index.py
+python3 scripts/build_index.py || echo "  [跳过] 暂无文档，可后续通过 http://localhost:8000/upload 上传 MD 文件后重建索引"
 
 # ---------- 5. 启动 Web 服务 ----------
 echo ""

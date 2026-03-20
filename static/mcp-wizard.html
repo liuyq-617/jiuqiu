@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCP 引导式配置 - CRM 知识库</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.04);
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+                   'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* Header */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .back-btn {
+      padding: 8px 16px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--muted);
+      text-decoration: none;
+      transition: all .15s;
+    }
+    .back-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .header-title { font-size: 18px; font-weight: 600; }
+
+    /* Container */
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* Steps */
+    .steps {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 32px;
+      position: relative;
+    }
+    .steps::before {
+      content: '';
+      position: absolute;
+      top: 20px;
+      left: 40px;
+      right: 40px;
+      height: 2px;
+      background: var(--border);
+      z-index: 0;
+    }
+    .step {
+      flex: 1;
+      text-align: center;
+      position: relative;
+      z-index: 1;
+    }
+    .step-circle {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--card);
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 8px;
+      font-weight: 600;
+      color: var(--muted);
+      transition: all .2s;
+    }
+    .step.active .step-circle {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+    .step.completed .step-circle {
+      background: var(--success);
+      border-color: var(--success);
+      color: white;
+    }
+    .step-label {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .step.active .step-label {
+      color: var(--primary);
+      font-weight: 500;
+    }
+
+    /* Card */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+    .card-title {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .card-desc {
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+
+    /* Form */
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .form-input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color .15s;
+    }
+    .form-input:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    .form-hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 12px 24px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn:hover { background: var(--primary-hover); }
+    .btn:disabled {
+      background: var(--border);
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: #f8fafc; }
+
+    .btn-group {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      margin-top: 24px;
+    }
+
+    /* Resource List */
+    .resource-list {
+      display: grid;
+      gap: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .resource-item {
+      padding: 16px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .resource-item:hover {
+      border-color: var(--primary);
+      background: #f8fafc;
+    }
+    .resource-item.selected {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+    .resource-name {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .resource-desc {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .resource-uri {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: monospace;
+      margin-top: 4px;
+    }
+
+    /* Preview */
+    .preview-section {
+      margin-top: 20px;
+    }
+    .preview-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .preview-box {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-size: 13px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Suggestion */
+    .suggestion-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .suggestion-title {
+      font-weight: 600;
+      color: var(--primary);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .suggestion-content {
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .suggestion-item {
+      margin-bottom: 8px;
+    }
+
+    /* Loading */
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--muted);
+    }
+    .spinner {
+      border: 3px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      top: 80px;
+      right: 24px;
+      padding: 12px 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.15);
+      z-index: 2000;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+    }
+    .toast.show { display: flex; animation: slideIn .3s; }
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error { border-left: 3px solid var(--error); }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <a href="/static/mcp.html" class="back-btn">← 返回</a>
+      <h1 class="header-title">MCP 引导式配置</h1>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Steps -->
+    <div class="steps">
+      <div class="step active" data-step="1">
+        <div class="step-circle">1</div>
+        <div class="step-label">连接服务器</div>
+      </div>
+      <div class="step" data-step="2">
+        <div class="step-circle">2</div>
+        <div class="step-label">选择资源</div>
+      </div>
+      <div class="step" data-step="3">
+        <div class="step-circle">3</div>
+        <div class="step-label">预览数据</div>
+      </div>
+      <div class="step" data-step="4">
+        <div class="step-circle">4</div>
+        <div class="step-label">配置确认</div>
+      </div>
+    </div>
+
+    <!-- Step 1: Connect -->
+    <div id="step1" class="card">
+      <h2 class="card-title">连接 MCP 服务器</h2>
+      <p class="card-desc">输入 MCP 服务器地址，系统将自动发现可用的资源和工具</p>
+
+      <div class="form-group">
+        <label class="form-label">MCP 服务器地址 *</label>
+        <input type="url" class="form-input" id="server-url" placeholder="http://192.168.127.98:8001" value="http://192.168.127.98:8001">
+        <div class="form-hint">例如：http://192.168.127.98:8001</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">数据类型 *</label>
+        <select class="form-input" id="data-type">
+          <option value="resource">Resources（静态数据资源）</option>
+          <option value="tool" selected>Tools（动态工具调用）</option>
+        </select>
+        <div class="form-hint">选择要使用的 MCP 数据类型</div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn" onclick="discoverData()">连接并发现数据</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Select Resource -->
+    <div id="step2" class="card hidden">
+      <h2 class="card-title" id="step2-title">选择数据资源</h2>
+      <p class="card-desc" id="step2-desc">从服务器发现的资源中选择一个进行配置</p>
+
+      <div id="resource-list" class="resource-list"></div>
+
+      <div class="btn-group">
+        <button class="btn btn-secondary" onclick="goToStep(1)">上一步</button>
+        <button class="btn" id="btn-preview" onclick="previewData()" disabled>预览数据</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Preview Data -->
+    <div id="step3" class="card hidden">
+      <h2 class="card-title">预览数据样本</h2>
+      <p class="card-desc">查看资源的数据结构和样本内容</p>
+
+      <div class="preview-section">
+        <div class="preview-title">数据样本（前 3 条）</div>
+        <div id="preview-data" class="preview-box"></div>
+      </div>
+
+      <div class="preview-section">
+        <div class="preview-title">AI 分块建议</div>
+        <div id="chunking-suggestion"></div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-secondary" onclick="goToStep(2)">上一步</button>
+        <button class="btn" onclick="goToStep(4)">下一步</button>
+      </div>
+    </div>
+
+    <!-- Step 4: Configure -->
+    <div id="step4" class="card hidden">
+      <h2 class="card-title">配置确认</h2>
+      <p class="card-desc">确认配置信息并保存数据源</p>
+
+      <div class="form-group">
+        <label class="form-label">数据源名称 *</label>
+        <input type="text" class="form-input" id="source-name" placeholder="例如：crm_activities">
+        <div class="form-hint">用于标识此数据源的唯一名称</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">资源 URI</label>
+        <input type="text" class="form-input" id="resource-uri-display" readonly>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">分块策略</label>
+        <input type="text" class="form-input" id="chunk-strategy-display" readonly>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">块大小</label>
+        <input type="number" class="form-input" id="chunk-size" value="1500">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">元数据字段（逗号分隔）</label>
+        <input type="text" class="form-input" id="metadata-fields" placeholder="date,company,owner">
+        <div class="form-hint">从数据中提取这些字段作为元数据</div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-secondary" onclick="goToStep(3)">上一步</button>
+        <button class="btn" onclick="saveConfiguration()">保存配置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let currentStep = 1;
+    let serverUrl = '';
+    let dataType = 'tool'; // 'resource' or 'tool'
+    let resources = [];
+    let tools = [];
+    let selectedItem = null;
+    let currentPreviewData = null;
+    let chunkingSuggestion = null;
+
+    // Step navigation
+    function goToStep(step) {
+      // Hide all steps
+      for (let i = 1; i <= 4; i++) {
+        document.getElementById(`step${i}`).classList.add('hidden');
+        const stepEl = document.querySelector(`.step[data-step="${i}"]`);
+        stepEl.classList.remove('active', 'completed');
+        if (i < step) {
+          stepEl.classList.add('completed');
+        }
+      }
+
+      // Show current step
+      document.getElementById(`step${step}`).classList.remove('hidden');
+      document.querySelector(`.step[data-step="${step}"]`).classList.add('active');
+      currentStep = step;
+    }
+
+    // Step 1: Discover data (resources or tools)
+    async function discoverData() {
+      serverUrl = document.getElementById('server-url').value.trim();
+      dataType = document.getElementById('data-type').value;
+
+      if (!serverUrl) {
+        showToast('请输入服务器地址', 'error');
+        return;
+      }
+
+      showLoading('step1', '正在连接服务器...');
+
+      try {
+        const endpoint = dataType === 'resource' ? '/api/mcp/discover' : '/api/mcp/discover/tools';
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base_url: serverUrl })
+        });
+
+        const data = await resp.json();
+        hideLoading('step1');
+
+        if (data.success) {
+          if (dataType === 'resource') {
+            resources = data.resources || [];
+            if (resources.length === 0) {
+              showToast('未发现任何资源', 'error');
+              return;
+            }
+            document.getElementById('step2-title').textContent = '选择数据资源';
+            document.getElementById('step2-desc').textContent = '从服务器发现的资源中选择一个进行配置';
+            renderItems(resources, 'resource');
+            showToast(`发现 ${resources.length} 个资源`, 'success');
+          } else {
+            tools = data.tools || [];
+            if (tools.length === 0) {
+              showToast('未发现任何工具', 'error');
+              return;
+            }
+            document.getElementById('step2-title').textContent = '选择数据工具';
+            document.getElementById('step2-desc').textContent = '从服务器发现的工具中选择一个进行配置';
+            renderItems(tools, 'tool');
+            showToast(`发现 ${tools.length} 个工具`, 'success');
+          }
+          goToStep(2);
+        } else {
+          showToast('连接失败: ' + (data.detail || '未知错误'), 'error');
+        }
+      } catch (err) {
+        hideLoading('step1');
+        showToast('连接失败: ' + err.message, 'error');
+      }
+    }
+
+    // Step 2: Render items (resources or tools)
+    function renderItems(items, type) {
+      const container = document.getElementById('resource-list');
+      container.innerHTML = items.map((item, idx) => {
+        const name = type === 'resource' ? (item.name || item.uri) : item.name;
+        const desc = item.description || '无描述';
+        const uri = type === 'resource' ? item.uri : `tool://${item.name}`;
+
+        return `
+          <div class="resource-item" onclick="selectItem(${idx})">
+            <div class="resource-name">${escapeHtml(name)}</div>
+            <div class="resource-desc">${escapeHtml(desc)}</div>
+            <div class="resource-uri">${escapeHtml(uri)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function selectItem(idx) {
+      selectedItem = dataType === 'resource' ? resources[idx] : tools[idx];
+      document.querySelectorAll('.resource-item').forEach((el, i) => {
+        el.classList.toggle('selected', i === idx);
+      });
+      document.getElementById('btn-preview').disabled = false;
+    }
+
+    // Step 3: Preview data
+    async function previewData() {
+      if (!selectedItem) {
+        showToast('请先选择一个' + (dataType === 'resource' ? '资源' : '工具'), 'error');
+        return;
+      }
+
+      goToStep(3);
+      showLoading('step3', '正在加载数据样本...');
+
+      try {
+        let resp, data;
+
+        if (dataType === 'resource') {
+          // Preview resource
+          resp = await fetch('/api/mcp/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              base_url: serverUrl,
+              resource_uri: selectedItem.uri,
+              filters: {}
+            })
+          });
+          data = await resp.json();
+
+          if (data.success) {
+            currentPreviewData = data.sample_data || [];
+            chunkingSuggestion = data.chunking_suggestion || {};
+          }
+        } else {
+          // Call tool to preview
+          resp = await fetch('/api/mcp/call/tool', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              base_url: serverUrl,
+              tool_name: selectedItem.name,
+              arguments: {}
+            })
+          });
+          data = await resp.json();
+
+          if (data.success) {
+            currentPreviewData = data.data || [];
+            // Generate chunking suggestion for tool data
+            chunkingSuggestion = {
+              strategy: 'no_split',
+              chunk_size: 1500,
+              metadata_fields: [],
+              avg_content_length: 0,
+              sample_count: data.total_count || 0
+            };
+          }
+        }
+
+        hideLoading('step3');
+
+        if (data.success) {
+          // Render preview - 格式化显示
+          const previewBox = document.getElementById('preview-data');
+
+          // 尝试解析并美化显示
+          let displayData = currentPreviewData.slice(0, 3);
+
+          // 如果数据是包含 text 字段的对象，尝试解析 text 内容
+          if (displayData.length > 0 && displayData[0].text) {
+            try {
+              // 尝试解析第一层 JSON
+              const parsedData = displayData.map(item => {
+                try {
+                  return JSON.parse(item.text);
+                } catch {
+                  return item;
+                }
+              });
+              displayData = parsedData;
+            } catch (e) {
+              // 解析失败，使用原始数据
+            }
+          }
+
+          previewBox.textContent = JSON.stringify(displayData, null, 2);
+
+          // Render suggestion
+          renderChunkingSuggestion();
+
+          showToast('数据加载成功', 'success');
+        } else {
+          showToast('加载失败: ' + (data.detail || '未知错误'), 'error');
+          goToStep(2);
+        }
+      } catch (err) {
+        hideLoading('step3');
+        showToast('加载失败: ' + err.message, 'error');
+        goToStep(2);
+      }
+    }
+
+    function renderChunkingSuggestion() {
+      const container = document.getElementById('chunking-suggestion');
+      const strategy = chunkingSuggestion.strategy || 'no_split';
+      const chunkSize = chunkingSuggestion.chunk_size || 1500;
+      const metadataFields = chunkingSuggestion.metadata_fields || [];
+      const avgLength = chunkingSuggestion.avg_content_length || 0;
+      const sampleCount = chunkingSuggestion.sample_count || 0;
+
+      let strategyText = '';
+      let strategyExplanation = '';
+      if (strategy === 'no_split') {
+        strategyText = '不分块（每条记录作为一个文档）';
+        strategyExplanation = '适用于：记录较短，每条记录独立完整';
+      } else if (strategy === 'by_size') {
+        strategyText = `按大小分块（每块 ${chunkSize} 字符）`;
+        strategyExplanation = '适用于：记录较长，需要切分成多个块以提高检索精度';
+      } else if (strategy === 'by_field') {
+        strategyText = '按字段分块';
+        strategyExplanation = '适用于：结构化数据，按特定字段分组';
+      }
+
+      // 生成预览示例
+      let previewExample = '';
+      if (currentPreviewData && currentPreviewData.length > 0) {
+        const firstItem = currentPreviewData[0];
+        let sampleText = '';
+
+        // 提取示例文本
+        if (firstItem.text) {
+          try {
+            const parsed = JSON.parse(firstItem.text);
+            if (parsed.result && parsed.result.records && parsed.result.records[0]) {
+              const record = parsed.result.records[0];
+              sampleText = record.content || JSON.stringify(record).substring(0, 200);
+            }
+          } catch {
+            sampleText = firstItem.text.substring(0, 200);
+          }
+        } else {
+          sampleText = JSON.stringify(firstItem).substring(0, 200);
+        }
+
+        if (strategy === 'no_split') {
+          previewExample = `
+            <div style="background: #f8fafc; padding: 12px; border-radius: 6px; margin-top: 12px; font-size: 12px;">
+              <div style="color: #64748b; margin-bottom: 6px;">📄 分块预览示例：</div>
+              <div style="font-family: monospace; color: #1e293b;">
+                文档 1: [完整记录] (${sampleText.length} 字符)<br>
+                "${sampleText}..."
+              </div>
+            </div>
+          `;
+        } else {
+          const chunks = Math.ceil(sampleText.length / chunkSize);
+          previewExample = `
+            <div style="background: #f8fafc; padding: 12px; border-radius: 6px; margin-top: 12px; font-size: 12px;">
+              <div style="color: #64748b; margin-bottom: 6px;">📄 分块预览示例（第一条记录将被分为 ${chunks} 块）：</div>
+              <div style="font-family: monospace; color: #1e293b;">
+                块 1: "${sampleText.substring(0, chunkSize)}..."<br>
+                ${chunks > 1 ? `块 2: "${sampleText.substring(chunkSize, chunkSize * 2)}..."` : ''}
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      container.innerHTML = `
+        <div class="suggestion-box">
+          <div class="suggestion-title">
+            <span>🤖</span>
+            <span>AI 推荐配置</span>
+          </div>
+          <div class="suggestion-content">
+            <div class="suggestion-item"><strong>数据类型：</strong>${dataType === 'resource' ? 'Resource' : 'Tool'}</div>
+            <div class="suggestion-item"><strong>样本数量：</strong>${sampleCount} 条</div>
+            <div class="suggestion-item"><strong>平均内容长度：</strong>${avgLength} 字符</div>
+            <div class="suggestion-item">
+              <strong>分块策略：</strong>${strategyText}
+              <div style="color: #64748b; font-size: 12px; margin-top: 4px;">${strategyExplanation}</div>
+            </div>
+            <div class="suggestion-item"><strong>建议块大小：</strong>${chunkSize} 字符</div>
+            <div class="suggestion-item"><strong>建议元数据字段：</strong>${metadataFields.join(', ') || '无'}</div>
+            ${previewExample}
+          </div>
+        </div>
+      `;
+
+      // Pre-fill step 4
+      document.getElementById('chunk-strategy-display').value = strategyText;
+      document.getElementById('chunk-size').value = chunkSize;
+      document.getElementById('metadata-fields').value = metadataFields.join(',');
+    }
+
+    // Step 4: Save configuration
+    async function saveConfiguration() {
+      const sourceName = document.getElementById('source-name').value.trim();
+      if (!sourceName) {
+        showToast('请输入数据源名称', 'error');
+        return;
+      }
+
+      const chunkSize = parseInt(document.getElementById('chunk-size').value);
+      const metadataFieldsStr = document.getElementById('metadata-fields').value.trim();
+      const metadataFields = metadataFieldsStr ? metadataFieldsStr.split(',').map(f => f.trim()) : [];
+
+      // Build metadata mapping
+      const metadataMapping = {};
+      metadataFields.forEach(field => {
+        metadataMapping[field] = field;
+      });
+
+      const config = {
+        name: sourceName,
+        type: dataType === 'resource' ? 'mcp' : 'mcp_tool',
+        enabled: true,
+        config: dataType === 'resource' ? {
+          base_url: serverUrl,
+          resource_uri: selectedItem.uri,
+          filters: {},
+          metadata_mapping: metadataMapping,
+          chunk_size: chunkSize
+        } : {
+          base_url: serverUrl,
+          tool_name: selectedItem.name,
+          arguments: {},
+          metadata_mapping: metadataMapping,
+          chunk_size: chunkSize
+        }
+      };
+
+      try {
+        const resp = await fetch('/api/mcp/sources', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+
+        const data = await resp.json();
+
+        if (data.success) {
+          showToast('配置保存成功！', 'success');
+          setTimeout(() => {
+            window.location.href = '/static/mcp.html';
+          }, 1500);
+        } else {
+          showToast('保存失败: ' + (data.detail || '未知错误'), 'error');
+        }
+      } catch (err) {
+        showToast('保存失败: ' + err.message, 'error');
+      }
+    }
+
+    // Pre-fill resource URI in step 4
+    function updateStep4() {
+      if (selectedItem) {
+        const uri = dataType === 'resource' ? selectedItem.uri : `tool://${selectedItem.name}`;
+        document.getElementById('resource-uri-display').value = uri;
+      }
+    }
+
+    // Watch for step changes
+    const originalGoToStep = goToStep;
+    goToStep = function(step) {
+      originalGoToStep(step);
+      if (step === 4) {
+        updateStep4();
+      }
+    };
+
+    // Utilities
+    function showLoading(stepId, message) {
+      const step = document.getElementById(stepId);
+      const loading = document.createElement('div');
+      loading.className = 'loading';
+      loading.innerHTML = `
+        <div class="spinner"></div>
+        <div>${message}</div>
+      `;
+      loading.id = `loading-${stepId}`;
+      step.appendChild(loading);
+    }
+
+    function hideLoading(stepId) {
+      const loading = document.getElementById(`loading-${stepId}`);
+      if (loading) {
+        loading.remove();
+      }
+    }
+
+    function showToast(message, type = 'success') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = `toast ${type} show`;
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

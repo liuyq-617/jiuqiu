@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCP 数据源管理 - CRM 知识库</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.04);
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+                   'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* Header */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .back-btn {
+      padding: 8px 16px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--muted);
+      text-decoration: none;
+      transition: all .15s;
+    }
+    .back-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .header-title { font-size: 18px; font-weight: 600; }
+
+    /* Container */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .btn {
+      padding: 10px 20px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn:hover { background: var(--primary-hover); }
+    .btn-secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: #f8fafc; }
+
+    /* Sources list */
+    .sources-list {
+      display: grid;
+      gap: 16px;
+    }
+    .source-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      transition: box-shadow .15s;
+    }
+    .source-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+
+    .source-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 12px;
+    }
+    .source-info h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .source-type {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #e0e7ff;
+      color: #4f46e5;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .source-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .icon-btn {
+      padding: 6px 10px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .icon-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .icon-btn.danger:hover { border-color: var(--error); color: var(--error); }
+
+    .source-details {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .source-details div { margin-bottom: 4px; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .status-badge.enabled {
+      background: #dcfce7;
+      color: #16a34a;
+    }
+    .status-badge.disabled {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+
+    /* Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal.show { display: flex; }
+    .modal-content {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 24px;
+      max-width: 600px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .modal-title { font-size: 18px; font-weight: 600; }
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: var(--muted);
+      line-height: 1;
+    }
+    .close-btn:hover { color: var(--text); }
+
+    /* Form */
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    .form-input, .form-select, .form-textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color .15s;
+    }
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    .form-textarea {
+      resize: vertical;
+      min-height: 80px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+    }
+    .form-hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .form-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .form-checkbox input {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+
+    .form-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      margin-top: 24px;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state h3 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+    .empty-state p { font-size: 14px; }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      top: 80px;
+      right: 24px;
+      padding: 12px 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.15);
+      z-index: 2000;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+    }
+    .toast.show { display: flex; animation: slideIn .3s; }
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error { border-left: 3px solid var(--error); }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <a href="/" class="back-btn">← 返回</a>
+      <h1 class="header-title">MCP 数据源管理</h1>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="toolbar">
+      <div>
+        <h2 style="font-size: 16px; color: var(--muted);">管理外部数据源接入</h2>
+      </div>
+      <div style="display: flex; gap: 12px;">
+        <a href="/static/mcp-wizard.html" class="btn" style="text-decoration: none; display: inline-flex; align-items: center;">
+          🧭 引导式配置
+        </a>
+        <button class="btn" onclick="showAddModal()">+ 手动添加</button>
+      </div>
+    </div>
+
+    <div id="sources-container" class="sources-list">
+      <div class="empty-state">
+        <div class="icon">🔌</div>
+        <h3>暂无数据源</h3>
+        <p>点击上方"添加数据源"按钮开始配置</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Modal -->
+  <div id="source-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-title">添加数据源</h2>
+        <button class="close-btn" onclick="closeModal()">&times;</button>
+      </div>
+      <form id="source-form" onsubmit="saveSource(event)">
+        <div class="form-group">
+          <label class="form-label">数据源名称 *</label>
+          <input type="text" class="form-input" id="source-name" required placeholder="例如：crm_api">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">数据源类型 *</label>
+          <select class="form-select" id="source-type" required onchange="updateFormFields()">
+            <option value="">请选择</option>
+            <option value="filesystem">文件系统</option>
+            <option value="http">HTTP API</option>
+            <option value="database">数据库</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-checkbox">
+            <input type="checkbox" id="source-enabled" checked>
+            <span>启用此数据源</span>
+          </label>
+        </div>
+
+        <div id="dynamic-fields"></div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+          <button type="submit" class="btn">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let sources = [];
+    let editingSource = null;
+
+    // Load sources on page load
+    window.addEventListener('DOMContentLoaded', loadSources);
+
+    async function loadSources() {
+      try {
+        const resp = await fetch('/api/mcp/sources');
+        const data = await resp.json();
+        if (data.success) {
+          sources = data.sources || [];
+          renderSources();
+        }
+      } catch (err) {
+        showToast('加载数据源失败: ' + err.message, 'error');
+      }
+    }
+
+    function renderSources() {
+      const container = document.getElementById('sources-container');
+      if (sources.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">🔌</div>
+            <h3>暂无数据源</h3>
+            <p>点击上方"添加数据源"按钮开始配置</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = sources.map(source => `
+        <div class="source-card">
+          <div class="source-header">
+            <div class="source-info">
+              <h3>${escapeHtml(source.name)}</h3>
+              <span class="source-type">${getTypeLabel(source.type)}</span>
+              <span class="status-badge ${source.enabled ? 'enabled' : 'disabled'}">
+                ${source.enabled ? '✓ 已启用' : '✗ 已禁用'}
+              </span>
+            </div>
+            <div class="source-actions">
+              <button class="icon-btn" onclick="testSource('${escapeHtml(source.name)}')" title="测试连接">🔍 测试</button>
+              <button class="icon-btn" onclick="editSource('${escapeHtml(source.name)}')" title="编辑">✏️ 编辑</button>
+              <button class="icon-btn danger" onclick="deleteSource('${escapeHtml(source.name)}')" title="删除">🗑️ 删除</button>
+            </div>
+          </div>
+          <div class="source-details">
+            ${renderSourceDetails(source)}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function getTypeLabel(type) {
+      const labels = {
+        'filesystem': '文件系统',
+        'http': 'HTTP API',
+        'database': '数据库'
+      };
+      return labels[type] || type;
+    }
+
+    function renderSourceDetails(source) {
+      if (source.type === 'filesystem') {
+        return `
+          <div><strong>路径：</strong>${escapeHtml(source.path || '')}</div>
+          <div><strong>匹配模式：</strong>${escapeHtml(source.pattern || '**/*.md')}</div>
+        `;
+      } else if (source.type === 'http') {
+        return `
+          <div><strong>URL：</strong>${escapeHtml(source.url || '')}</div>
+          <div><strong>方法：</strong>${escapeHtml(source.method || 'GET')}</div>
+        `;
+      } else if (source.type === 'database') {
+        return `
+          <div><strong>类型：</strong>${escapeHtml(source.db_type || 'mysql')}</div>
+          <div><strong>主机：</strong>${escapeHtml(source.host || 'localhost')}:${source.port || 3306}</div>
+          <div><strong>数据库：</strong>${escapeHtml(source.database || '')}</div>
+        `;
+      }
+      return '';
+    }
+
+    function showAddModal() {
+      editingSource = null;
+      document.getElementById('modal-title').textContent = '添加数据源';
+      document.getElementById('source-form').reset();
+      document.getElementById('source-enabled').checked = true;
+      document.getElementById('dynamic-fields').innerHTML = '';
+      document.getElementById('source-modal').classList.add('show');
+    }
+
+    function editSource(name) {
+      const source = sources.find(s => s.name === name);
+      if (!source) return;
+
+      editingSource = source;
+      document.getElementById('modal-title').textContent = '编辑数据源';
+      document.getElementById('source-name').value = source.name;
+      document.getElementById('source-type').value = source.type;
+      document.getElementById('source-enabled').checked = source.enabled;
+
+      updateFormFields();
+
+      // Fill dynamic fields
+      setTimeout(() => {
+        if (source.type === 'filesystem') {
+          document.getElementById('fs-path').value = source.path || '';
+          document.getElementById('fs-pattern').value = source.pattern || '**/*.md';
+        } else if (source.type === 'http') {
+          document.getElementById('http-url').value = source.url || '';
+          document.getElementById('http-method').value = source.method || 'GET';
+          document.getElementById('http-headers').value = JSON.stringify(source.headers || {}, null, 2);
+          document.getElementById('http-content-path').value = source.content_path || 'data';
+          document.getElementById('http-text-field').value = source.text_field || 'content';
+        } else if (source.type === 'database') {
+          document.getElementById('db-type').value = source.db_type || 'mysql';
+          document.getElementById('db-host').value = source.host || 'localhost';
+          document.getElementById('db-port').value = source.port || 3306;
+          document.getElementById('db-user').value = source.user || '';
+          document.getElementById('db-password').value = source.password || '';
+          document.getElementById('db-database').value = source.database || '';
+          document.getElementById('db-query').value = source.query || '';
+          document.getElementById('db-text-field').value = source.text_field || 'content';
+        }
+      }, 0);
+
+      document.getElementById('source-modal').classList.add('show');
+    }
+
+    function closeModal() {
+      document.getElementById('source-modal').classList.remove('show');
+    }
+
+    function updateFormFields() {
+      const type = document.getElementById('source-type').value;
+      const container = document.getElementById('dynamic-fields');
+
+      if (type === 'filesystem') {
+        container.innerHTML = `
+          <div class="form-group">
+            <label class="form-label">文件路径 *</label>
+            <input type="text" class="form-input" id="fs-path" required placeholder="/path/to/documents">
+            <div class="form-hint">文件或目录的绝对路径</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">匹配模式</label>
+            <input type="text" class="form-input" id="fs-pattern" value="**/*.md" placeholder="**/*.md">
+            <div class="form-hint">Glob 模式，例如 **/*.md</div>
+          </div>
+        `;
+      } else if (type === 'http') {
+        container.innerHTML = `
+          <div class="form-group">
+            <label class="form-label">API URL *</label>
+            <input type="url" class="form-input" id="http-url" required placeholder="https://api.example.com/data">
+          </div>
+          <div class="form-group">
+            <label class="form-label">HTTP 方法</label>
+            <select class="form-select" id="http-method">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">请求头 (JSON)</label>
+            <textarea class="form-textarea" id="http-headers" placeholder='{"Authorization": "Bearer TOKEN"}'>{}</textarea>
+            <div class="form-hint">JSON 格式的请求头</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">数据路径</label>
+            <input type="text" class="form-input" id="http-content-path" value="data" placeholder="data">
+            <div class="form-hint">响应中数据的路径，例如 data.items</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">文本字段名</label>
+            <input type="text" class="form-input" id="http-text-field" value="content" placeholder="content">
+            <div class="form-hint">包含文本内容的字段名</div>
+          </div>
+        `;
+      } else if (type === 'database') {
+        container.innerHTML = `
+          <div class="form-group">
+            <label class="form-label">数据库类型</label>
+            <select class="form-select" id="db-type">
+              <option value="mysql">MySQL</option>
+              <option value="postgresql">PostgreSQL</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">主机地址 *</label>
+            <input type="text" class="form-input" id="db-host" required value="localhost" placeholder="localhost">
+          </div>
+          <div class="form-group">
+            <label class="form-label">端口</label>
+            <input type="number" class="form-input" id="db-port" value="3306" placeholder="3306">
+          </div>
+          <div class="form-group">
+            <label class="form-label">用户名 *</label>
+            <input type="text" class="form-input" id="db-user" required placeholder="root">
+          </div>
+          <div class="form-group">
+            <label class="form-label">密码</label>
+            <input type="password" class="form-input" id="db-password" placeholder="password">
+          </div>
+          <div class="form-group">
+            <label class="form-label">数据库名 *</label>
+            <input type="text" class="form-input" id="db-database" required placeholder="crm">
+          </div>
+          <div class="form-group">
+            <label class="form-label">SQL 查询 *</label>
+            <textarea class="form-textarea" id="db-query" required placeholder="SELECT * FROM activities"></textarea>
+            <div class="form-hint">查询语句，返回包含文本内容的记录</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">文本字段名</label>
+            <input type="text" class="form-input" id="db-text-field" value="content" placeholder="content">
+            <div class="form-hint">包含文本内容的字段名</div>
+          </div>
+        `;
+      } else {
+        container.innerHTML = '';
+      }
+    }
+
+    async function saveSource(event) {
+      event.preventDefault();
+
+      const name = document.getElementById('source-name').value;
+      const type = document.getElementById('source-type').value;
+      const enabled = document.getElementById('source-enabled').checked;
+
+      let config = {};
+
+      if (type === 'filesystem') {
+        config = {
+          path: document.getElementById('fs-path').value,
+          pattern: document.getElementById('fs-pattern').value
+        };
+      } else if (type === 'http') {
+        try {
+          const headers = JSON.parse(document.getElementById('http-headers').value || '{}');
+          config = {
+            url: document.getElementById('http-url').value,
+            method: document.getElementById('http-method').value,
+            headers: headers,
+            content_path: document.getElementById('http-content-path').value,
+            text_field: document.getElementById('http-text-field').value
+          };
+        } catch (err) {
+          showToast('请求头 JSON 格式错误', 'error');
+          return;
+        }
+      } else if (type === 'database') {
+        config = {
+          db_type: document.getElementById('db-type').value,
+          host: document.getElementById('db-host').value,
+          port: parseInt(document.getElementById('db-port').value),
+          user: document.getElementById('db-user').value,
+          password: document.getElementById('db-password').value,
+          database: document.getElementById('db-database').value,
+          query: document.getElementById('db-query').value,
+          text_field: document.getElementById('db-text-field').value
+        };
+      }
+
+      const payload = { name, type, enabled, config };
+
+      try {
+        let resp;
+        if (editingSource) {
+          resp = await fetch(`/api/mcp/sources/${editingSource.name}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          resp = await fetch('/api/mcp/sources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        }
+
+        const data = await resp.json();
+        if (data.success) {
+          showToast(data.message, 'success');
+          closeModal();
+          loadSources();
+        } else {
+          showToast(data.detail || '保存失败', 'error');
+        }
+      } catch (err) {
+        showToast('保存失败: ' + err.message, 'error');
+      }
+    }
+
+    async function deleteSource(name) {
+      if (!confirm(`确定要删除数据源"${name}"吗？`)) return;
+
+      try {
+        const resp = await fetch(`/api/mcp/sources/${name}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) {
+          showToast(data.message, 'success');
+          loadSources();
+        } else {
+          showToast(data.detail || '删除失败', 'error');
+        }
+      } catch (err) {
+        showToast('删除失败: ' + err.message, 'error');
+      }
+    }
+
+    async function testSource(name) {
+      showToast('正在测试连接...', 'success');
+
+      try {
+        const resp = await fetch(`/api/mcp/sources/${name}/test`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+          showToast(`测试成功！获取到 ${data.doc_count} 条数据`, 'success');
+        } else {
+          showToast('测试失败: ' + (data.detail || '未知错误'), 'error');
+        }
+      } catch (err) {
+        showToast('测试失败: ' + err.message, 'error');
+      }
+    }
+
+    function showToast(message, type = 'success') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = `toast ${type} show`;
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
