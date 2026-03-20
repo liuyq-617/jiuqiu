@@ -5,24 +5,30 @@
 ### 1. 检索增强 (Advanced RAG)
 **目标**: 提升召回率和排序质量
 
-- [ ] **查询改写 (Query Rewriting)**
+- [x] **查询改写 (Query Rewriting)**
   - 用 LLM 生成查询变体（同义词、不同表述）
   - 扩大召回范围，减少表述差异导致的漏检
 
-- [ ] **混合检索 (Hybrid Search)**
+- [x] **混合检索 (Hybrid Search)**
   - 向量检索 + BM25 关键词检索
   - Reciprocal Rank Fusion (RRF) 融合排名
   - 平衡语义理解和精确匹配
 
-- [ ] **LLM 重排序 (Reranking)**
+- [x] **LLM 重排序 (Reranking)**
   - 用 LLM 对候选结果打相关性分数 (1-10)
   - 提升排序质量，优先展示最有用的片段
 
-- [ ] **父文档展开 (Parent Doc Retrieval)**
+- [x] **父文档展开 (Parent Doc Retrieval)**
   - 检索到子块时自动拼合完整父文档
   - 保留更丰富的上下文信息
 
-**实现文件**: `app/advanced_rag.py`（新增）、`app/rag.py`、`app/config.py`
+- [ ] **BM25 中文分词优化**（`app/advanced_rag.py` `_bm25_scores`）
+  - 当前：按单字拆分（`"客户拜访"` → `["客","户","拜","访"]`），关键词匹配精度有限
+  - 目标：引入 `jieba` 按词语拆分（`"客户拜访"` → `["客户","拜访"]`），提升 BM25 精确匹配效果
+  - 实现：`pip install jieba`，替换 `_bm25_scores` 内 `tokenize` 函数
+  - 注意：jieba 首次加载有约 1s 冷启动，建议在服务启动时预热
+
+**实现文件**: `app/advanced_rag.py`（已有）、`app/rag.py`、`app/config.py`
 
 ---
 
@@ -72,6 +78,60 @@
   - [ ] 凭据定期轮换提醒
 
 **实现文件**: `app/mcp_loader.py`（新增）、`app/document_loader.py`、`mcp_config.json`
+
+---
+
+---
+
+### 3.5 回答质量闭环优化（本次对话新增）
+**目标**: 将 LLM-as-Judge 分数转化为可执行的 Prompt 改进行动
+
+#### 3.5.1 Prompt 自动优化闭环
+- [ ] **低分样本分析脚本** `scripts/prompt_optimizer.py`
+  - 从 `feedback.db` 提取近 7 天平均分 < 3.5 的样本，按路由类型分组（ranking / evaluation / aggregate / metadata_filter / semantic）
+  - 调用 Meta-LLM 分析共性缺陷，生成候选 Prompt 改进建议
+  - 写入 `prompt_candidates` 表（status=pending），待人工审核后上线
+
+- [ ] **`prompt_candidates` 数据表**（在 `feedback.db` 中新增）
+  - 字段：`route` / `suggestion` / `sample_count` / `status` / `avg_score_before` / `avg_score_after`
+  - status 流转：`pending` → `approved` / `rejected`
+
+- [ ] **`rag.py` 热加载已审核 Prompt**
+  - `_load_active_prompt()`：优先读取 `prompt_candidates` 表中最新 approved 记录
+  - 无审核记录时降级使用默认 `SYSTEM_PROMPT`
+
+- [ ] **每日定时触发**（`main.py` lifespan 后台线程）
+  - 凌晨 03:00 自动运行 `prompt_optimizer.py --min-samples 5`
+  - 依赖：`pip install schedule`
+
+**实现文件**: `scripts/prompt_optimizer.py`（新增）、`app/rag.py`、`app/feedback.py`、`app/main.py`
+
+---
+
+#### 3.5.2 飞书机器人集成评价机制
+**目标**: 飞书用户的每次问答也进入评价闭环，与 Web 端数据统一
+
+- [ ] **`_process_question` 接入 feedback**（`feishu_bot.py`，5行代码，最高优先）
+  - RAG 结束后调用 `save_qa()` 生成 `answer_id`
+  - 同步触发 `trigger_judge(answer_id)` 异步 LLM 评分
+  - 记录 `start_time` 计算 `response_ms`
+
+- [ ] **卡片末尾添加 👍/👎/⭐ 交互按钮**
+  - 新增 `_close_streaming_card_with_feedback(card_id, seq, final_text, answer_id)`
+  - 按钮 `value` 字段携带 `{"action": "thumbs_up/thumbs_down/rate_detail", "answer_id": "..."}`
+  - 用全量更新接口替换旧的 `_close_streaming_card`
+
+- [ ] **注册卡片按钮回调** `_on_card_action()`
+  - 解析 `action_value`，路由到对应处理逻辑
+  - `thumbs_up/thumbs_down` → `save_thumbs()` + 卡片更新为"感谢反馈 ✅"
+  - `rate_detail` → `_send_rating_form()` 私信发详细评分卡片
+  - 在 `start_ws_client()` 中注册：`.register_p2_card_action_trigger_v1(_on_card_action)`
+
+- [ ] **私信详细评分表单** `_send_rating_form(open_id, answer_id)`
+  - 1-5 分按钮卡片，用户点击后调用 `save_manual_scores()`
+  - 在群聊场景中避免暴露评分流程
+
+**实现文件**: `app/feishu_bot.py`
 
 ---
 
