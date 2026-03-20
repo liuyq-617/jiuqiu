@@ -12,9 +12,11 @@ from typing import List, Dict, Any, Iterator, Optional, Tuple
 import httpx
 
 from app.config import (
-    CHAT_API_KEY, CHAT_BASE_URL, OPENAI_CHAT_MODEL, TOP_K, CHAT_API_MODE
+    CHAT_API_KEY, CHAT_BASE_URL, OPENAI_CHAT_MODEL, TOP_K, CHAT_API_MODE,
+    ADVANCED_RAG_ENABLED,
 )
-from app.vector_store import search, get_aggregate_stats, query_by_metadata, get_distinct_values
+from app.vector_store import search, get_aggregate_stats, query_by_metadata, get_distinct_values, get_field_activity_counts, query_by_company_keyword
+from app.advanced_rag import advanced_retrieve
 
 logger = logging.getLogger("crm_rag")
 
@@ -204,6 +206,144 @@ def extract_filters(question: str) -> Dict[str, str]:
     return {"owner": owner, "date_from": date_from, "date_to": date_to}
 
 
+# ========== 多人评价/排名问题检测 ==========
+# 此类问题需要逐人拉取明细活动记录，而非走聚合统计
+_EVALUATION_PATTERNS = [
+    r'(所有|全部|全体|每个|各个|所有的).{0,6}(销售|负责人|同事|员工).{0,10}(评价|排名|排行|考核|绩效|表现|工作|业绩)',
+    r'(评价|排名|排行|考核|绩效|表现|业绩).{0,10}(所有|全部|全体|每个|各个).{0,6}(销售|负责人|同事|员工)',
+    r'(销售|负责人|销售人员).{0,6}(排名|排行榜|绩效排名|评分|评级|综合.{0,4}评)',
+    r'谁.{0,6}(最好|最差|最积极|最努力|排[第名]|第一|倒数)',
+    r'对(所有|每个|各个|全部).{0,6}(销售|负责人).{0,10}(做|给|进行).{0,6}(评价|评估|分析|考核)',
+]
+_EVALUATION_RE = re.compile('|'.join(_EVALUATION_PATTERNS))
+
+
+def _is_evaluation_question(question: str) -> bool:
+    """判断是否为需要逐人拉取明细的多人评价/排名问题"""
+    return bool(_EVALUATION_RE.search(question))
+
+
+def _build_evaluation_context(question: str, per_owner_limit: int = 60) -> tuple:
+    """
+    为多人评价问题构建上下文：遍历所有负责人，分别拉取活动明细。
+    返回 (context_str, sources)
+    """
+    owners = _get_owners()
+    if not owners:
+        return "（知识库中未找到任何负责人记录）", []
+
+    logger.info(f"[evaluation] 开始逐一拉取 {len(owners)} 位负责人的活动记录")
+    parts = []
+    sources = set()
+
+    for owner in owners:
+        hits = query_by_metadata(owner=owner, limit=per_owner_limit)
+        logger.info(f"[evaluation] {owner}: 共 {len(hits)} 条记录")
+        if not hits:
+            parts.append(f"\n### 负责人：{owner}\n（无活动记录）\n")
+            continue
+
+        sources.update(h["source"] for h in hits)
+        # 按日期排序（新 → 旧）
+        hits_sorted = sorted(hits, key=lambda h: h.get("date") or "", reverse=True)
+        records = []
+        for h in hits_sorted:
+            meta = ""
+            if h.get("date"):
+                meta += f"[{h['date']}] "
+            if h.get("company"):
+                meta += f"客户:{h['company']}  "
+            records.append(f"{meta}{h['text']}")
+        parts.append(
+            f"\n### 负责人：{owner}（共 {len(hits)} 条活动记录）\n"
+            + "\n".join(records)
+        )
+
+    context = (
+        "【各销售人员活动明细（逐人完整记录）】\n"
+        "以下为知识库中所有负责人的跟进活动详情，请基于此进行综合评价与排名。\n"
+        + "".join(parts)
+    )
+    return context, list(sources)
+
+
+# ========== 活跃度/数量排名问题检测 ==========
+# 检测"前N客户/负责人 按活动记录数量排名"类问题
+_RANKING_PATTERNS = [
+    r'活跃.{0,6}前\s*(\d+|[一二三四五六七八九十]+)',
+    r'前\s*(\d+|[一二三四五六七八九十]+).{0,10}(活跃|活动|跟进|记录)',
+    r'(活动|跟进|拜访).{0,6}(记录|次数).{0,10}(前|最多|排名|排行)',
+    r'(最|更)活跃.{0,8}(客户|公司|负责人|销售)',
+    r'(客户|公司|负责人|销售).{0,10}(活跃|活动次数|跟进次数).{0,6}(排[名行]|前\d)',
+    r'(活动|记录).{0,4}(数量|次数).{0,4}(排[名行]|前\d|最多)',
+    r'跟进(次数|记录数).{0,6}(前|最多|排)',
+    r'(哪[些个家]).{0,6}客户.{0,10}(最|更)?(多|频繁|活跃)',
+]
+_RANKING_RE = re.compile('|'.join(_RANKING_PATTERNS))
+
+# 识别排名字段：客户 or 负责人
+_RANKING_FIELD_OWNER_RE = re.compile(r'(负责人|销售|员工|同事)')
+_RANKING_FIELD_COMPANY_RE = re.compile(r'(客户|公司|企业)')
+
+
+def _is_ranking_question(question: str) -> bool:
+    """判断是否为按活动数量排名的问题"""
+    return bool(_RANKING_RE.search(question))
+
+
+def _extract_ranking_params(question: str) -> Dict[str, Any]:
+    """
+    从问题中提取排名参数：
+    - field: 'company' 或 'owner'
+    - top_n: 数字，默认 5
+    """
+    # 判断字段
+    if _RANKING_FIELD_OWNER_RE.search(question) and not _RANKING_FIELD_COMPANY_RE.search(question):
+        field = "owner"
+    else:
+        field = "company"
+
+    # 中文数字映射
+    _CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+               "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+    # 提取 N（支持阿拉伯数字和中文数字）
+    n_match = re.search(r'前\s*(\d+|[一二三四五六七八九十]+)', question)
+    if n_match:
+        raw = n_match.group(1)
+        if raw.isdigit():
+            top_n = int(raw)
+        else:
+            top_n = _CN_NUM.get(raw, 5)
+    else:
+        top_n = 5
+
+    return {"field": field, "top_n": top_n}
+
+
+def _build_ranking_context(question: str) -> tuple:
+    """为活跃度排名问题构建上下文：统计各实体的活动记录数量并排序"""
+    params = _extract_ranking_params(question)
+    field = params["field"]
+    top_n = params["top_n"]
+
+    counts = get_field_activity_counts(field, top_n=top_n * 3)  # 多拉一些做筛选余量
+
+    if not counts:
+        return "（知识库中未找到相关记录）", []
+
+    field_label = "客户" if field == "company" else "负责人"
+    lines = [
+        f"【{field_label}活跃度排名（按活动记录数量，共统计 {len(counts)} 个{field_label}）】",
+        f"以下为活动记录数量最多的前 {top_n} 个{field_label}：\n",
+    ]
+    for rank, item in enumerate(counts[:top_n], 1):
+        lines.append(f"第 {rank} 名：{item['value']}（活动记录数：{item['count']} 条）")
+
+    context = "\n".join(lines)
+    return context, ["crm_activities_recent.md"]
+
+
 # ========== 聚合问题关键词检测 ==========
 # 聚合型问题使用正则匹配，兼容量词变体（个/家/位/条 等）
 _AGGREGATE_PATTERNS = [
@@ -227,6 +367,9 @@ def _is_aggregate_question(question: str) -> bool:
     """
     if not _AGGREGATE_RE.search(question):
         return False
+    # 含业务分析/进展语义时，不走聚合清单路由
+    if re.search(r'进展|跟进|推进|分析|总结|情况|动态|风险|机会|策略|建议|成单|转化|原因', question):
+        return False
     # 如果问题里有具体人名，走元数据过滤而非聚合
     if _extract_owner(question):
         return False
@@ -247,6 +390,125 @@ def _build_aggregate_context(question: str) -> tuple:
         f"负责人列表：{owners_str}\n"
     )
     return context, ["crm_activities_recent.md"]
+
+
+# ========== 行业场景汇总问题检测 ==========
+# 针对"某行业的应用场景/案例/如何/怎样/主要用途"类跨客户汇总问题
+# 需要通过 company 字段关键词过滤拉取全量相关记录，再由 LLM 汇总场景
+_INDUSTRY_SCENARIO_PATTERNS = [
+    r'(烟草|卷烟|石油|石化|化工|钢铁|电力|水务|矿山|医疗|金融|银行|交通|制造|新能源|汽车|半导体|光伏|风电).{0,10}'
+    r'(应用场景|应用案例|典型场景|使用场景|落地场景|项目场景|主要场景|常见场景|案例|如何应用|怎么.{0,4}用|主要应用|应用情况)',
+    r'(应用场景|应用案例|典型场景|使用场景).{0,10}'
+    r'(烟草|卷烟|石油|石化|化工|钢铁|电力|水务|矿山|医疗|金融|银行|交通|制造|新能源|汽车|半导体)',
+    r'在(烟草|卷烟|石油|石化|化工|钢铁|电力|水务|矿山|医疗|金融|银行|交通|制造|新能源|汽车|半导体|光伏|风电).{0,6}'
+    r'(的|行业|领域).{0,10}(场景|案例|应用|怎么用|如何|用途)',
+]
+_INDUSTRY_SCENARIO_RE = re.compile('|'.join(_INDUSTRY_SCENARIO_PATTERNS))
+
+# 行业关键词 -> company 过滤关键词映射
+_INDUSTRY_KEYWORD_MAP = {
+    '烟草': '烟',
+    '卷烟': '烟',
+    '石油': '石油',
+    '石化': '石化',
+    '化工': '化工',
+    '钢铁': '钢铁',
+    '电力': '电力',
+    '水务': '水务',
+    '矿山': '矿',
+    '医疗': '医',
+    '金融': '金融',
+    '银行': '银行',
+    '交通': '交通',
+    '制造': '',  # 制造业覆盖面太广，不做 company 过滤，走语义检索
+    '新能源': '新能源',
+    '汽车': '汽车',
+    '半导体': '半导体',
+    '光伏': '光伏',
+    '风电': '风电',
+}
+
+
+def _is_industry_scenario_question(question: str) -> bool:
+    """判断是否为行业场景汇总类问题（跨多个客户，需要行业维度召回）"""
+    return bool(_INDUSTRY_SCENARIO_RE.search(question))
+
+
+def _extract_industry_keyword(question: str) -> str:
+    """从问题中提取行业名称，返回对应的 company 过滤关键词"""
+    for industry, company_kw in _INDUSTRY_KEYWORD_MAP.items():
+        if industry in question:
+            return company_kw
+    return ""
+
+
+def _build_industry_scenario_context(question: str, limit: int = 300) -> tuple:
+    """
+    为行业场景汇总问题构建上下文：
+    1. 提取行业关键词，过滤对应客户记录
+    2. 按客户去重合并，尽量覆盖不同客户/场景
+    3. 返回 (context_str, sources)
+    """
+    company_kw = _extract_industry_keyword(question)
+    if not company_kw:
+        # 无法提取有效行业关键词，降级到语义检索
+        return None, None
+
+    hits = query_by_company_keyword(keyword=company_kw, limit=limit)
+    if not hits:
+        context = f'（知识库中未找到与"{company_kw}"相关的客户活动记录）'
+        return context, []
+
+    # 按客户分组，每个客户最多保留 5 条记录（避免单客户占满上下文）
+    company_records: Dict[str, List[Dict]] = {}
+    for h in hits:
+        company = h.get("company", "未知客户")
+        if company not in company_records:
+            company_records[company] = []
+        if len(company_records[company]) < 5:
+            company_records[company].append(h)
+
+    parts = [f"【行业客户活动记录汇总（共 {len(company_records)} 个客户，{len(hits)} 条记录）】\n"]
+    for company, records in company_records.items():
+        parts.append(f"\n#### 客户：{company}")
+        for r in records:
+            meta = f"[{r.get('date', '')}]"
+            if r.get('owner'):
+                meta += f" 负责人：{r['owner']}"
+            parts.append(f"{meta}\n{r['text']}")
+
+    context = "\n".join(parts)
+    sources = list({h["source"] for h in hits})
+    return context, sources
+
+
+_INDUSTRY_SCENARIO_SYSTEM_PROMPT = """你是一个专业的 CRM 业务助手，拥有公司近期客户跟进活动的完整知识库。
+你的任务是根据提供的多个行业客户的 CRM 活动记录，汇总归纳该行业的 TDengine 应用场景。
+
+回答规范：
+1. 聚焦提炼"应用场景/项目场景"，按场景类型分类汇总，不要逐条罗列每个客户
+2. 对同类场景进行合并归纳，提炼共性；对个性化场景单独列出
+3. 每个场景需说明：场景名称、具体需求描述、涉及的典型客户（1-2个举例）
+4. 如有"不适用场景"或特殊限制，在末尾单独标注
+5. 回答使用中文，结构清晰，分点列举
+6. 不要编造信息，严格基于记录内容汇总
+"""
+
+
+def build_industry_scenario_messages(question: str, context: str) -> List[Dict[str, str]]:
+    """为行业场景汇总问题构建专用 Prompt"""
+    user_content = f"""请根据以下 CRM 活动记录，汇总归纳 TDengine 在相关行业的应用场景。
+
+=== CRM 活动记录（按客户分组）===
+{context}
+
+=== 用户问题 ===
+{question}
+"""
+    return [
+        {"role": "system", "content": _INDUSTRY_SCENARIO_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
 
 
 # ========== System Prompt ==========
@@ -303,11 +565,38 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
     logger.info(f"[answer] 问题: {question}")
 
     # --- 路由优先级判断 ---
-    if _is_aggregate_question(question):
+    is_industry_scenario = False
+    if _is_ranking_question(question):
+        # 活跃度/数量排名类：统计各实体activity记录数
+        logger.info("[answer] 检测到活跃度排名问题，统计活动记录数量")
+        context, sources = _build_ranking_context(question)
+        hits = []
+    elif _is_evaluation_question(question):
+        # 多人评价排名类：逐人拉取活动明细
+        logger.info("[answer] 检测到多人评价/排名问题，逐人拉取活动明细")
+        context, sources = _build_evaluation_context(question)
+        hits = []
+    elif _is_aggregate_question(question):
         # 全量统计类：多少客户/负责人
         logger.info("[answer] 检测到聚合统计问题，使用全量元数据查询")
         context, sources = _build_aggregate_context(question)
         hits = []
+    elif _is_industry_scenario_question(question):
+        # 行业场景汇总类：按行业关键词过滤所有相关客户记录
+        logger.info("[answer] 检测到行业场景汇总问题，按行业关键词过滤客户记录")
+        ctx, srcs = _build_industry_scenario_context(question)
+        if ctx is not None:
+            context, sources, hits = ctx, srcs, []
+            is_industry_scenario = True
+        else:
+            # 降级：关键词提取失败，走语义检索
+            logger.info("[answer] 行业关键词提取失败，降级到语义检索")
+            if ADVANCED_RAG_ENABLED:
+                hits = advanced_retrieve(question, top_k=top_k)
+            else:
+                hits = search(question, top_k=top_k)
+            context = build_context(hits)
+            sources = list({h["source"] for h in hits})
     else:
         # 尝试提取元数据过滤器
         filters = extract_filters(question)
@@ -335,13 +624,20 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
                 context = build_context(hits)
             sources = list({h["source"] for h in hits})
         else:
-            # 纯语义相似度检索
-            hits = search(question, top_k=top_k)
-            logger.info(f"[answer] 语义检索到 {len(hits)} 条相关片段")
+            # 语义检索（普通 or Advanced RAG）
+            if ADVANCED_RAG_ENABLED:
+                hits = advanced_retrieve(question, top_k=top_k)
+                logger.info(f"[answer] Advanced RAG 检索到 {len(hits)} 条相关片段")
+            else:
+                hits = search(question, top_k=top_k)
+                logger.info(f"[answer] 语义检索到 {len(hits)} 条相关片段")
             context = build_context(hits)
             sources = list({h["source"] for h in hits})
 
-    messages = build_messages(question, context)
+    if is_industry_scenario:
+        messages = build_industry_scenario_messages(question, context)
+    else:
+        messages = build_messages(question, context)
 
     url = _chat_url()
     payload = _build_payload(messages, stream=False)
@@ -385,7 +681,27 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
     logger.info(f"[stream] 问题: {question}")
 
     # --- 路由判断 ---
-    if _is_aggregate_question(question):
+    is_industry_scenario = False
+    if _is_ranking_question(question):
+        logger.info("[stream] 检测到活跃度排名问题，统计活动记录数量")
+        try:
+            context, sources = _build_ranking_context(question)
+            hits = []
+        except Exception as e:
+            logger.error(f"[stream] 排名查询失败: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'content': f'排名查询失败: {e}'}, ensure_ascii=False)}\n\n"
+            return
+    elif _is_evaluation_question(question):
+        # 多人评价排名类：逐人拉取活动明细
+        logger.info("[stream] 检测到多人评价/排名问题，逐人拉取活动明细")
+        try:
+            context, sources = _build_evaluation_context(question)
+            hits = []
+        except Exception as e:
+            logger.error(f"[stream] 多人评价查询失败: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'content': f'评价查询失败: {e}'}, ensure_ascii=False)}\n\n"
+            return
+    elif _is_aggregate_question(question):
         logger.info("[stream] 检测到聚合统计问题，使用全量元数据查询")
         try:
             context, sources = _build_aggregate_context(question)
@@ -393,6 +709,25 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
         except Exception as e:
             logger.error(f"[stream] 聚合查询失败: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': f'聚合查询失败: {e}'}, ensure_ascii=False)}\n\n"
+            return
+    elif _is_industry_scenario_question(question):
+        logger.info("[stream] 检测到行业场景汇总问题，按行业关键词过滤客户记录")
+        try:
+            ctx, srcs = _build_industry_scenario_context(question)
+            if ctx is not None:
+                context, sources, hits = ctx, srcs, []
+                is_industry_scenario = True
+            else:
+                logger.info("[stream] 行业关键词提取失败，降级到语义检索")
+                if ADVANCED_RAG_ENABLED:
+                    hits = advanced_retrieve(question, top_k=top_k)
+                else:
+                    hits = search(question, top_k=top_k)
+                context = build_context(hits)
+                sources = list({h["source"] for h in hits})
+        except Exception as e:
+            logger.error(f"[stream] 行业场景查询失败: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'content': f'行业场景查询失败: {e}'}, ensure_ascii=False)}\n\n"
             return
     else:
         filters = extract_filters(question)
@@ -424,14 +759,18 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
                 context = build_context(hits)
             sources = list({h["source"] for h in hits})
         else:
-            # --- 纯向量检索 ---
+            # --- 语义检索（普通 or Advanced RAG）---
             try:
-                hits = search(question, top_k=top_k)
+                if ADVANCED_RAG_ENABLED:
+                    hits = advanced_retrieve(question, top_k=top_k)
+                    logger.info(f"[stream] Advanced RAG 检索到 {len(hits)} 条相关片段")
+                else:
+                    hits = search(question, top_k=top_k)
+                    logger.info(f"[stream] 语义检索到 {len(hits)} 条相关片段")
             except Exception as e:
-                logger.error(f"[stream] 向量检索失败: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'content': f'向量检索失败: {e}'}, ensure_ascii=False)}\n\n"
+                logger.error(f"[stream] 检索失败: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'content': f'检索失败: {e}'}, ensure_ascii=False)}\n\n"
                 return
-            logger.info(f"[stream] 语义检索到 {len(hits)} 条相关片段")
             sources = list({h["source"] for h in hits})
             context = build_context(hits)
 
@@ -439,7 +778,10 @@ def answer_stream(question: str, top_k: int = TOP_K) -> Iterator[str]:
     yield f"data: {json.dumps({'type': 'sources', 'sources': sources, 'hits': hits}, ensure_ascii=False)}\n\n"
 
     # --- 3. 构建 Prompt ---
-    messages = build_messages(question, context)
+    if is_industry_scenario:
+        messages = build_industry_scenario_messages(question, context)
+    else:
+        messages = build_messages(question, context)
     url      = _chat_url()
     payload  = _build_payload(messages, stream=True)
 

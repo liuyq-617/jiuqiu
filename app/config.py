@@ -50,6 +50,26 @@ API_PORT = 8000
 API_TITLE = "CRM 知识库问答系统"
 API_VERSION = "1.0.0"
 
+# ========== Advanced RAG 配置 (11.1) ==========
+# 总开关：为 False 时回退到原始向量检索
+ADVANCED_RAG_ENABLED = os.getenv("ADVANCED_RAG_ENABLED", "true").lower() == "true"
+
+# 1. 查询改写：用 LLM 生成 N 个查询变体，扩大召回
+ADVANCED_RAG_QUERY_REWRITE = os.getenv("ADVANCED_RAG_QUERY_REWRITE", "true").lower() == "true"
+ADVANCED_RAG_REWRITE_N = int(os.getenv("ADVANCED_RAG_REWRITE_N", "2"))       # 生成变体数量
+
+# 2. 混合检索：向量检索 + BM25 RRF 融合
+#    expand_factor 决定每个查询召回 top_k * N 条候选，再融合裁剪
+ADVANCED_RAG_HYBRID_SEARCH = os.getenv("ADVANCED_RAG_HYBRID_SEARCH", "true").lower() == "true"
+ADVANCED_RAG_EXPAND_FACTOR = int(os.getenv("ADVANCED_RAG_EXPAND_FACTOR", "3"))  # 候选扩展倍数
+
+# 3. LLM 重排序：对前 N 条候选用 LLM 重打分
+ADVANCED_RAG_RERANKER = os.getenv("ADVANCED_RAG_RERANKER", "true").lower() == "true"
+ADVANCED_RAG_RERANK_TOP_N = int(os.getenv("ADVANCED_RAG_RERANK_TOP_N", "10"))   # 送入重排序的候选数
+
+# 4. 父文档检索：子块命中时自动拼合完整父活动记录
+ADVANCED_RAG_PARENT_DOC = os.getenv("ADVANCED_RAG_PARENT_DOC", "true").lower() == "true"
+
 # ========== 飞书机器人配置（长连接模式，无需公网域名）==========
 # 飞书开放平台 -> 凭证与基础信息 -> App ID / App Secret
 FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")

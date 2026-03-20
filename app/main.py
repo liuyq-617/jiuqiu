@@ -39,7 +39,7 @@ from app.vector_store import connect_milvus, ensure_collection, get_aggregate_st
 from app.document_loader import load_and_split
 from app.vector_store import build_index
 from app.feishu_bot import start_ws_client
-from app.feedback import init_db, save_qa, save_thumbs, trigger_judge, get_stats as get_feedback_stats
+from app.feedback import init_db, save_qa, save_thumbs, save_manual_scores, trigger_judge, get_stats as get_feedback_stats
 
 
 # ========== 应用生命周期 ==========
@@ -387,24 +387,59 @@ async def get_stats():
 
 class FeedbackRequest(BaseModel):
     answer_id: str = Field(..., description="问答记录 ID（由 answer_id 事件或响应体中获取）")
-    thumbs: int = Field(..., description="1 = 赞，-1 = 踩")
+    thumbs: Optional[int] = Field(default=None, description="1 = 赞，-1 = 踩；与手动打分不互斥")
     trigger_judge: bool = Field(default=True, description="是否异步触发 LLM-as-Judge 评分")
+    # 手动打分（1~5 整数）
+    manual_relevance:    Optional[float] = Field(default=None, ge=1, le=5, description="相关性 1~5")
+    manual_completeness: Optional[float] = Field(default=None, ge=1, le=5, description="完整性 1~5")
+    manual_accuracy:     Optional[float] = Field(default=None, ge=1, le=5, description="准确性 1~5")
+    manual_comment:      Optional[str]   = Field(default=None, description="手动评语（可选）")
 
 
 @app.post(
     "/api/feedback",
-    summary="提交回答反馈（赞/踩）",
-    description="用户对某条回答点赞或踩，可选触发 LLM-as-Judge 自动评分（后台异步执行）。",
+    summary="提交回答反馈（赞/踩 + 可选手动打分）",
+    description=(
+        "提交对某条回答的评价。支持两种模式：\n\n"
+        "1. **快速反馈**：仅传 `thumbs`（1=赞 / -1=踩）\n"
+        "2. **手动打分**：传 `manual_relevance` / `manual_completeness` / `manual_accuracy`（1~5 分）\n\n"
+        "两种模式可同时使用。手动打分会根据平均分自动推算 `thumbs`（≥3.5→赞）。"
+    ),
     operation_id="submitFeedback",
     tags=["质量评价"],
 )
 async def submit_feedback(req: FeedbackRequest):
-    ok = save_thumbs(req.answer_id, req.thumbs)
-    if not ok:
-        raise HTTPException(status_code=404, detail=f"找不到 answer_id={req.answer_id}")
+    has_thumbs = req.thumbs is not None
+    has_manual = all(v is not None for v in [req.manual_relevance, req.manual_completeness, req.manual_accuracy])
+
+    if not has_thumbs and not has_manual:
+        raise HTTPException(status_code=422, detail="请提供 thumbs 或 manual_relevance/completeness/accuracy")
+
+    if has_thumbs:
+        ok = save_thumbs(req.answer_id, req.thumbs)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"找不到 answer_id={req.answer_id}")
+
+    if has_manual:
+        ok = save_manual_scores(
+            req.answer_id,
+            req.manual_relevance,
+            req.manual_completeness,
+            req.manual_accuracy,
+            req.manual_comment or "",
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"找不到 answer_id={req.answer_id}")
+
     if req.trigger_judge:
         trigger_judge(req.answer_id)
-    return {"success": True, "answer_id": req.answer_id, "thumbs": req.thumbs}
+
+    return {
+        "success": True,
+        "answer_id": req.answer_id,
+        "thumbs": req.thumbs,
+        "manual_scored": has_manual,
+    }
 
 
 @app.get(

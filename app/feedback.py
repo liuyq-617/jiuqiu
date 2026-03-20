@@ -57,15 +57,31 @@ def init_db() -> None:
                 response_ms     INTEGER DEFAULT 0,
                 created_at      TEXT NOT NULL,
                 thumbs          INTEGER DEFAULT NULL,   -- 1 赞 / -1 踩 / NULL 未评价
-                llm_relevance   REAL DEFAULT NULL,      -- 1.0~5.0
+                llm_relevance   REAL DEFAULT NULL,      -- LLM 自动评分 1.0~5.0
                 llm_completeness REAL DEFAULT NULL,
                 llm_accuracy    REAL DEFAULT NULL,
                 llm_comment     TEXT DEFAULT NULL,
-                llm_judged_at   TEXT DEFAULT NULL
+                llm_judged_at   TEXT DEFAULT NULL,
+                manual_relevance    REAL DEFAULT NULL,  -- 用户手动打分 1~5
+                manual_completeness REAL DEFAULT NULL,
+                manual_accuracy     REAL DEFAULT NULL,
+                manual_comment      TEXT DEFAULT NULL,
+                manual_scored_at    TEXT DEFAULT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_qa_created ON qa_log(created_at DESC);
         """)
+        # 兼容旧库：按需 ALTER TABLE 追加手动打分列
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(qa_log)").fetchall()}
+        for col_def in [
+            ("manual_relevance",    "REAL DEFAULT NULL"),
+            ("manual_completeness", "REAL DEFAULT NULL"),
+            ("manual_accuracy",     "REAL DEFAULT NULL"),
+            ("manual_comment",      "TEXT DEFAULT NULL"),
+            ("manual_scored_at",    "TEXT DEFAULT NULL"),
+        ]:
+            if col_def[0] not in existing:
+                conn.execute(f"ALTER TABLE qa_log ADD COLUMN {col_def[0]} {col_def[1]}")
     logger.info("[feedback] 数据库初始化完成: %s", _DB_PATH)
 
 
@@ -92,6 +108,38 @@ def save_thumbs(answer_id: str, thumbs: int) -> bool:
     with _db_lock, _get_conn() as conn:
         cur = conn.execute(
             "UPDATE qa_log SET thumbs=? WHERE id=?", (thumbs, answer_id)
+        )
+        return cur.rowcount > 0
+
+
+def save_manual_scores(
+    answer_id: str,
+    relevance: float,
+    completeness: float,
+    accuracy: float,
+    comment: str = "",
+) -> bool:
+    """
+    保存用户手动打分（1~5 分，支持整数）。
+    同时将 thumbs 自动更新：平均分 >= 3.5 → 赞，< 3.5 → 踩。
+    返回是否找到对应记录。
+    """
+    for v in (relevance, completeness, accuracy):
+        if not (1 <= v <= 5):
+            return False
+
+    avg = (relevance + completeness + accuracy) / 3
+    auto_thumbs = 1 if avg >= 3.5 else -1
+    scored_at = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    with _db_lock, _get_conn() as conn:
+        cur = conn.execute(
+            """UPDATE qa_log SET
+                manual_relevance=?, manual_completeness=?, manual_accuracy=?,
+                manual_comment=?, manual_scored_at=?,
+                thumbs=COALESCE(thumbs, ?)
+               WHERE id=?""",
+            (relevance, completeness, accuracy, comment, scored_at, auto_thumbs, answer_id),
         )
         return cur.rowcount > 0
 
@@ -226,10 +274,17 @@ def get_stats() -> dict:
         avg_acc = conn.execute("SELECT AVG(llm_accuracy) FROM qa_log WHERE llm_accuracy IS NOT NULL").fetchone()[0]
         judged_count = conn.execute("SELECT COUNT(*) FROM qa_log WHERE llm_judged_at IS NOT NULL").fetchone()[0]
 
+        # 手动打分均值
+        m_rel  = conn.execute("SELECT AVG(manual_relevance)    FROM qa_log WHERE manual_relevance IS NOT NULL").fetchone()[0]
+        m_comp = conn.execute("SELECT AVG(manual_completeness) FROM qa_log WHERE manual_completeness IS NOT NULL").fetchone()[0]
+        m_acc  = conn.execute("SELECT AVG(manual_accuracy)     FROM qa_log WHERE manual_accuracy IS NOT NULL").fetchone()[0]
+        manual_count = conn.execute("SELECT COUNT(*) FROM qa_log WHERE manual_scored_at IS NOT NULL").fetchone()[0]
+
         # 近 30 条明细
         rows = conn.execute(
             """SELECT id, question, answer, response_ms, created_at,
-                      thumbs, llm_relevance, llm_completeness, llm_accuracy, llm_comment, llm_judged_at
+                      thumbs, llm_relevance, llm_completeness, llm_accuracy, llm_comment, llm_judged_at,
+                      manual_relevance, manual_completeness, manual_accuracy, manual_comment, manual_scored_at
                FROM qa_log ORDER BY created_at DESC LIMIT 30"""
         ).fetchall()
 
@@ -244,6 +299,10 @@ def get_stats() -> dict:
         "avg_llm_relevance":    round(avg_rel, 2)  if avg_rel  else None,
         "avg_llm_completeness": round(avg_comp, 2) if avg_comp else None,
         "avg_llm_accuracy":     round(avg_acc, 2)  if avg_acc  else None,
+        "manual_count": manual_count,
+        "avg_manual_relevance":    round(m_rel, 2)  if m_rel  else None,
+        "avg_manual_completeness": round(m_comp, 2) if m_comp else None,
+        "avg_manual_accuracy":     round(m_acc, 2)  if m_acc  else None,
         "recent": [
             {
                 "id": r["id"],
@@ -257,6 +316,11 @@ def get_stats() -> dict:
                 "llm_accuracy": r["llm_accuracy"],
                 "llm_comment": r["llm_comment"],
                 "llm_judged_at": r["llm_judged_at"],
+                "manual_relevance": r["manual_relevance"],
+                "manual_completeness": r["manual_completeness"],
+                "manual_accuracy": r["manual_accuracy"],
+                "manual_comment": r["manual_comment"],
+                "manual_scored_at": r["manual_scored_at"],
             }
             for r in rows
         ],

@@ -633,12 +633,117 @@ python3 scripts/benchmark.py --no-judge
 
 ### 11.1 检索增强 (Advanced RAG)
 
-当前单路向量检索 + top_k 方式存在召回率不足的问题。
+**文件**: `app/advanced_rag.py`（新增）、`app/rag.py`、`app/config.py`、`requirements.txt`
 
-- **查询改写 (Query Rewriting)**: 用 LLM 将用户问题改写为更适合检索的形式，或拆解为多个子查询
-- **混合检索 (Hybrid Search)**: 结合向量检索 + BM25 关键词检索，Milvus 2.4 已原生支持
-- **重排序 (Reranking)**: 检索后用 Cross-Encoder（如 `bge-reranker`）对结果二次排序，提高精度
-- **父文档检索 (Parent Document Retrieval)**: 小块检索、大块返回，兆合精准检索和充分上下文
+#### 背景
+
+原始向量检索（top_k=5 语义最近邻）存在两个核心问题：
+1. **召回率不足**：仅找语义最近的 5 条，多义查询、表述差异大的查询容易漏掉相关记录
+2. **排序质量差**：向量相似度与"对回答问题有用"的相关性并不等价
+
+本次实现四项增强技术串联为一条 Pipeline，并在 `rag.py` 中作为语义检索路由的默认路径接入。
+
+---
+
+#### 架构总览
+
+```
+用户问题
+    │
+    ▼ [1] 查询改写 (Query Rewriting)         ADVANCED_RAG_QUERY_REWRITE=true
+多个查询变体（原始 + N 个重写）
+    │
+    ▼ [2] 混合检索 (Hybrid Search / RRF)     ADVANCED_RAG_HYBRID_SEARCH=true
+    │   · 对每个变体做向量检索（top_k × expand_factor 条）
+    │   · BM25 对全量候选重打分
+    │   · Reciprocal Rank Fusion 融合向量排名 + BM25 排名
+候选命中列表（去重合并）
+    │
+    ▼ [3] LLM 重排序 (Reranking)             ADVANCED_RAG_RERANKER=true
+    │   · 取前 ADVANCED_RAG_RERANK_TOP_N 条送入 LLM
+    │   · LLM 为每条片段打 1-10 相关性分
+    │   · 按分数重新排序，裁至 top_k
+精排后命中列表
+    │
+    ▼ [4] 父文档展开 (Parent Doc Retrieval)  ADVANCED_RAG_PARENT_DOC=true
+    │   · chunk_type=activity_part 子块 → 拼合所有同 chunk_id 前缀的子块
+    │   · 替换为完整父活动记录，保留更丰富上下文
+最终命中列表
+```
+
+---
+
+#### 新增文件：`app/advanced_rag.py`
+
+| 函数 | 说明 |
+|---|---|
+| `rewrite_query(question, n)` | LLM 改写为 n 个变体，失败时降级为 `[question]` |
+| `_bm25_scores(query, texts)` | 用 `rank_bm25.BM25Okapi` 对候选打分并归一化；未安装则降级为 0.0 |
+| `_reciprocal_rank_fusion(rankings)` | RRF 融合多个排名列表，参数 k=60 |
+| `hybrid_retrieve(queries, top_k)` | 多查询向量召回 → BM25 重打分 → RRF 融合 → 返回 top_k |
+| `llm_rerank(question, hits, top_n)` | LLM 批量打 1-10 分，JSON 解析失败时降级为原序 |
+| `expand_to_parent(hits)` | activity_part 子块拼合展开，其余类型透传 |
+| `advanced_retrieve(question, top_k)` | 四步串联总入口，`rag.py` 直接调用此函数 |
+
+所有组件均有异常捕获 + 降级逻辑，任意步骤失败不影响主流程返回结果。
+
+---
+
+#### `app/config.py` 新增配置项
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `ADVANCED_RAG_ENABLED` | `true` | 总开关，`false` 回退到原始向量检索 |
+| `ADVANCED_RAG_QUERY_REWRITE` | `true` | 启用查询改写 |
+| `ADVANCED_RAG_REWRITE_N` | `2` | 生成查询变体数量 |
+| `ADVANCED_RAG_HYBRID_SEARCH` | `true` | 启用 BM25 + 向量 RRF 混合检索 |
+| `ADVANCED_RAG_EXPAND_FACTOR` | `3` | 候选扩展倍数（每查询召回 top_k × N 条） |
+| `ADVANCED_RAG_RERANKER` | `true` | 启用 LLM 重排序 |
+| `ADVANCED_RAG_RERANK_TOP_N` | `10` | 送入重排序的候选数量 |
+| `ADVANCED_RAG_PARENT_DOC` | `true` | 启用父文档展开 |
+
+---
+
+#### `requirements.txt` 新增依赖
+
+```
+rank_bm25>=0.2.2   # BM25 混合检索
+```
+
+安装：`pip install rank_bm25`
+
+---
+
+#### 路由影响
+
+仅影响 `rag.py` 的**语义检索分支**（既非评价排名、非聚合统计、也无元数据过滤条件的普通问题）：
+
+```python
+# 修改前
+hits = search(question, top_k=top_k)
+
+# 修改后
+if ADVANCED_RAG_ENABLED:
+    hits = advanced_retrieve(question, top_k=top_k)
+else:
+    hits = search(question, top_k=top_k)
+```
+
+多人评价、聚合统计、元数据过滤三条路由不受影响。
+
+---
+
+#### 性能预期
+
+| 场景 | 延迟增加 | 准确率提升 |
+|---|---|---|
+| 仅查询改写 | +0.5~1s（LLM 调用） | 多义查询召回率 ↑ |
+| 仅混合检索（BM25） | +50~100ms | 关键词精确匹配 ↑ |
+| 仅重排序 | +1~2s（LLM 调用） | 排序相关性 ↑ |
+| 全部启用 | +2~4s | 综合准确率显著提升 |
+
+如对延迟敏感，可在 `.env` 中单独关闭 `ADVANCED_RAG_RERANKER=false` 或 `ADVANCED_RAG_QUERY_REWRITE=false`。
+
 
 ### 11.2 多轮对话与上下文记忆
 
