@@ -233,7 +233,147 @@
       font-size: 12px;
       color: var(--muted);
     }
-  </style>
+
+    /* ── Prompt Candidate Cards ── */
+    .candidate-card {
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin-bottom: 16px;
+      position: relative;
+      transition: border-color .2s;
+    }
+    .candidate-card.pending  { border-left: 4px solid var(--warn); }
+    .candidate-card.approved { border-left: 4px solid var(--success); opacity: .7; }
+    .candidate-card.rejected { border-left: 4px solid var(--danger);  opacity: .6; }
+    .candidate-meta {
+      display: flex; flex-wrap: wrap; gap: 10px;
+      align-items: center; margin-bottom: 10px;
+    }
+    .route-badge {
+      background: #ede9fe; color: #6d28d9;
+      font-size: 11px; font-weight: 600;
+      padding: 3px 10px; border-radius: 20px;
+    }
+    .score-badge {
+      background: #fef3c7; color: #92400e;
+      font-size: 11px; padding: 3px 10px; border-radius: 20px;
+    }
+    .ts-badge {
+      font-size: 11px; color: var(--muted);
+    }
+    .prompt-preview {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: #475569;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      max-height: 140px;
+      overflow: hidden;
+      position: relative;
+      cursor: pointer;
+      transition: max-height .3s ease;
+    }
+    .prompt-preview.expanded { max-height: 600px; }
+    .prompt-preview::after {
+      content: '▼ 点击展开完整内容';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      padding: 20px 14px 8px;
+      background: linear-gradient(transparent, #f8fafc 60%);
+      font-size: 11px; color: var(--primary);
+      text-align: center;
+    }
+    .prompt-preview.expanded::after { display: none; }
+    .candidate-actions {
+      display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center;
+    }
+    .btn-success {
+      background: var(--success); color: white;
+    }
+    .btn-success:not(:disabled):hover { background: #15803d; }
+    .btn-sm { padding: 7px 16px; font-size: 13px; }
+    .status-pill {
+      font-size: 12px; font-weight: 600; padding: 4px 12px;
+      border-radius: 20px; display: inline-block;
+    }
+    .status-pill.pending  { background: #fef3c7; color: #92400e; }
+    .status-pill.approved { background: #dcfce7; color: #15803d; }
+    .status-pill.rejected { background: #fee2e2; color: #b91c1c; }
+    .empty-hint {
+      text-align: center; color: var(--muted); font-size: 13px;
+      padding: 32px 0;
+    }
+
+    /* ── Compare Panel ── */
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    @media (max-width: 640px) { .compare-grid { grid-template-columns: 1fr; } }
+    .compare-col {
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .compare-col-header {
+      padding: 10px 16px;
+      font-size: 12px; font-weight: 600;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .compare-col-header.old { background: #fef9c3; color: #854d0e; }
+    .compare-col-header.new { background: #dcfce7; color: #166534; }
+    .compare-body {
+      padding: 14px 16px;
+      font-size: 13px; line-height: 1.7;
+      color: var(--text);
+      white-space: pre-wrap;
+      min-height: 80px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .compare-loading {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--muted); font-size: 13px; padding: 16px;
+    }
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Benchmark Add ── */
+    .kw-input-row {
+      display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;
+    }
+    .kw-input-row input {
+      flex: 1; min-width: 120px;
+      border: 1.5px solid var(--border);
+      border-radius: 7px; padding: 8px 12px; font-size: 13px;
+      outline: none; transition: border-color .2s;
+    }
+    .kw-input-row input:focus { border-color: var(--primary); }
+    .kw-tag {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #ede9fe; color: #6d28d9;
+      border-radius: 6px; padding: 3px 10px; font-size: 12px;
+    }
+    .kw-tag button {
+      background: none; border: none; cursor: pointer;
+      color: inherit; font-size: 13px; line-height: 1; padding: 0;
+    }
+    .bm-result {
+      margin-top: 12px; font-size: 13px; display: none;
+    }
+</style>
 </head>
 <body>
 
@@ -352,7 +492,123 @@
     <div class="tag-list" id="owner-list"><span style="color:var(--muted);font-size:12px;">加载中…</span></div>
   </div>
 
-</div>
+  <!-- ── Prompt 候选审核 ─────────────────────────────────────────────── -->
+  <div class="section" id="section-candidates">
+    <div class="section-header">
+      <div>
+        <div class="section-title">🧠 Prompt 候选审核</div>
+        <div class="section-desc">
+          查看由优化器自动生成的候选 SYSTEM_PROMPT，对比新旧回答效果后决定是否上线。<br>
+          Approve 后服务在 60 秒内热加载，无需重启。
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;">
+        <select id="cand-filter" onchange="loadCandidates()" style="
+          border:1.5px solid var(--border);border-radius:7px;
+          padding:7px 12px;font-size:13px;background:white;cursor:pointer;">
+          <option value="">全部</option>
+          <option value="pending" selected>待审核</option>
+          <option value="approved">已上线</option>
+          <option value="rejected">已拒绝</option>
+        </select>
+        <button class="btn btn-outline btn-sm" onclick="loadCandidates()">🔃 刷新</button>
+      </div>
+    </div>
+
+    <div id="candidates-list">
+      <div class="empty-hint">加载中…</div>
+    </div>
+  </div>
+
+  <!-- ── 效果验证沙箱 ────────────────────────────────────────────────── -->
+  <div class="section" id="section-sandbox">
+    <div class="section-header">
+      <div>
+        <div class="section-title">🔬 效果验证沙箱</div>
+        <div class="section-desc">
+          输入测试问题，同时用 <strong>旧 Prompt</strong> 和 <strong>候选新 Prompt</strong> 各回答一次，并排对比效果。<br>
+          满意的问题可一键收录到 <code>benchmark.py</code> 回归测试集。
+        </div>
+      </div>
+    </div>
+
+    <!-- 选择候选 -->
+    <div style="margin-bottom:14px;">
+      <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">
+        选择要验证的候选 Prompt
+      </label>
+      <select id="sandbox-cand-select" style="
+        width:100%;border:1.5px solid var(--border);border-radius:7px;
+        padding:9px 12px;font-size:13px;background:white;">
+        <option value="">— 请先选择候选 —</option>
+      </select>
+    </div>
+
+    <!-- 输入问题 -->
+    <div style="margin-bottom:14px;">
+      <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">
+        测试问题（每行一个，最多 3 条）
+      </label>
+      <textarea id="sandbox-questions" rows="4" placeholder="例：
+魏明慧最近跟进了哪些客户？
+蒯歆越上个月有哪些活动？" style="
+        width:100%;border:1.5px solid var(--border);border-radius:7px;
+        padding:10px 12px;font-size:13px;resize:vertical;outline:none;
+        font-family:inherit;transition:border-color .2s;
+      " onfocus="this.style.borderColor='var(--primary)'"
+         onblur="this.style.borderColor='var(--border)'"></textarea>
+    </div>
+
+    <button class="btn btn-primary" onclick="runSandbox()" id="sandbox-btn">
+      ▶ 开始对比
+    </button>
+
+    <!-- 对比结果区 -->
+    <div id="sandbox-results" style="margin-top:20px;"></div>
+  </div>
+
+  <!-- ── 加入 Benchmark 面板（隐藏，点按钮弹出） ── -->
+  <div id="bm-modal" style="
+    display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);
+    z-index:100;align-items:center;justify-content:center;padding:20px;">
+    <div style="
+      background:white;border-radius:14px;padding:28px;
+      max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.2);">
+      <div style="font-size:16px;font-weight:700;margin-bottom:4px;">📋 加入 Benchmark 测试集</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:18px;">
+        将该问题追加到 <code>scripts/benchmark.py</code>，成为长期回归测试用例。
+      </div>
+
+      <label style="font-size:13px;font-weight:500;display:block;margin-bottom:4px;">问题</label>
+      <input id="bm-question" type="text" readonly style="
+        width:100%;border:1.5px solid var(--border);border-radius:7px;
+        padding:9px 12px;font-size:13px;background:#f8fafc;margin-bottom:14px;" />
+
+      <label style="font-size:13px;font-weight:500;display:block;margin-bottom:4px;">分类</label>
+      <input id="bm-category" type="text" value="人工验证" style="
+        width:100%;border:1.5px solid var(--border);border-radius:7px;
+        padding:9px 12px;font-size:13px;margin-bottom:14px;outline:none;" />
+
+      <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">
+        预期关键词（至少 1 个，命中任意一个即 PASS）
+      </label>
+      <div class="kw-input-row">
+        <input id="bm-kw-input" type="text" placeholder="输入关键词后按 Enter 添加"
+          onkeydown="addKw(event)" style="flex:1;min-width:140px;" />
+        <button class="btn btn-outline btn-sm" onclick="addKw({key:'Enter'})">＋ 添加</button>
+      </div>
+      <div id="bm-kw-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;min-height:28px;"></div>
+
+      <div class="bm-result" id="bm-result"></div>
+
+      <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end;">
+        <button class="btn btn-outline" onclick="closeBmModal()">取消</button>
+        <button class="btn btn-primary" onclick="submitBenchmark()">✅ 确认加入</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
 
 <script>
 // ── helpers ──────────────────────────────────────────────────────────
@@ -560,6 +816,285 @@ function doRebuild() {
 
 // ── Init ──────────────────────────────────────────────────────────────
 loadStats();
+loadCandidates();
+
+// ═══════════════════════════════════════════════════════════════════
+// Prompt 候选审核
+// ═══════════════════════════════════════════════════════════════════
+
+let _candidatesData = [];  // 缓存列表，供沙箱下拉用
+
+async function loadCandidates() {
+  const listEl = document.getElementById('candidates-list');
+  const filter = document.getElementById('cand-filter').value;
+  listEl.innerHTML = '<div class="empty-hint">加载中…</div>';
+
+  try {
+    const url = '/api/prompt-candidates' + (filter ? `?status=${filter}` : '');
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!d.success) throw new Error(d.detail || '获取失败');
+
+    _candidatesData = d.data || [];
+    renderCandidates(_candidatesData);
+    populateSandboxSelect(_candidatesData);
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-hint" style="color:var(--danger)">❌ ${e.message}</div>`;
+  }
+}
+
+function renderCandidates(items) {
+  const listEl = document.getElementById('candidates-list');
+  if (!items.length) {
+    listEl.innerHTML = '<div class="empty-hint">暂无候选记录</div>';
+    return;
+  }
+  listEl.innerHTML = items.map(c => {
+    const scoreHtml = c.avg_score_before != null
+      ? `<span class="score-badge">优化前均分 ${c.avg_score_before.toFixed(2)}</span>` : '';
+    const statusPill = `<span class="status-pill ${c.status}">${
+      {pending:'待审核', approved:'✅ 已上线', rejected:'❌ 已拒绝'}[c.status] || c.status
+    }</span>`;
+    const reviewInfo = c.reviewed_at
+      ? `<span class="ts-badge">审核: ${c.reviewed_at}</span>` : '';
+    const noteHtml = c.review_note
+      ? `<div style="font-size:12px;color:var(--muted);margin-top:6px;">备注: ${escHtml(c.review_note)}</div>` : '';
+    const actionBtns = c.status === 'pending' ? `
+      <button class="btn btn-success btn-sm" onclick="doApprove('${c.id}')">✅ Approve 上线</button>
+      <button class="btn btn-outline btn-sm" onclick="openRejectModal('${c.id}')">❌ Reject</button>
+      <button class="btn btn-outline btn-sm" onclick="previewInSandbox('${c.id}')">🔬 跳转验证</button>
+    ` : (c.status === 'approved' ? `
+      <button class="btn btn-danger btn-sm" onclick="doReject('${c.id}','已被更新替换')">撤回</button>
+    ` : '');
+
+    return `
+    <div class="candidate-card ${c.status}" id="card-${c.id}">
+      <div class="candidate-meta">
+        <span class="route-badge">路由: ${c.route}</span>
+        ${scoreHtml}
+        <span class="ts-badge">生成: ${c.created_at}</span>
+        ${reviewInfo}
+        ${statusPill}
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">
+        样本数: ${c.sample_count} 条低分记录触发生成
+      </div>
+      <div class="prompt-preview" id="pp-${c.id}" onclick="togglePrompt('${c.id}')">${escHtml(c.suggestion)}</div>
+      ${noteHtml}
+      <div class="candidate-actions">${actionBtns}</div>
+    </div>`;
+  }).join('');
+}
+
+function togglePrompt(id) {
+  document.getElementById(`pp-${id}`).classList.toggle('expanded');
+}
+
+async function doApprove(id, note = '') {
+  if (!confirm('确认 Approve 此候选 Prompt 并上线？')) return;
+  try {
+    const r = await fetch(`/api/prompt-candidates/${id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.detail || '操作失败');
+    alert('✅ 已 Approve，60 秒内生效');
+    loadCandidates();
+  } catch (e) {
+    alert('❌ ' + e.message);
+  }
+}
+
+async function doReject(id, note = '') {
+  try {
+    const r = await fetch(`/api/prompt-candidates/${id}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.detail || '操作失败');
+    loadCandidates();
+  } catch (e) {
+    alert('❌ ' + e.message);
+  }
+}
+
+function openRejectModal(id) {
+  const note = prompt('拒绝原因（可选）：', '');
+  if (note === null) return;
+  doReject(id, note);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 效果验证沙箱
+// ═══════════════════════════════════════════════════════════════════
+
+function populateSandboxSelect(items) {
+  const sel = document.getElementById('sandbox-cand-select');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— 请先选择候选 —</option>';
+  items.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = `[${c.status}] ${c.route}  |  ${c.created_at.slice(0,16)}  |  ${c.id.slice(0,8)}…`;
+    sel.appendChild(opt);
+  });
+  if (cur) sel.value = cur;
+}
+
+function previewInSandbox(id) {
+  document.getElementById('sandbox-cand-select').value = id;
+  document.getElementById('section-sandbox').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function runSandbox() {
+  const candId = document.getElementById('sandbox-cand-select').value;
+  if (!candId) { alert('请先选择候选 Prompt'); return; }
+
+  const raw = document.getElementById('sandbox-questions').value.trim();
+  const questions = raw.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 3);
+  if (!questions.length) { alert('请输入至少一条测试问题'); return; }
+
+  const btn = document.getElementById('sandbox-btn');
+  const results = document.getElementById('sandbox-results');
+  btn.disabled = true;
+  btn.textContent = '对比中…';
+
+  // 先渲染骨架
+  results.innerHTML = questions.map((q, i) => `
+    <div style="margin-bottom:24px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span>问题 ${i+1}：${escHtml(q)}</span>
+        <button class="btn btn-outline btn-sm" onclick="openBmModal(${JSON.stringify(q)})"
+          title="加入 benchmark.py">📋 加入测试集</button>
+      </div>
+      <div class="compare-grid">
+        <div class="compare-col">
+          <div class="compare-col-header old">🔴 当前 Prompt（旧）</div>
+          <div class="compare-body" id="old-${i}"><div class="compare-loading"><div class="spinner"></div>生成中…</div></div>
+        </div>
+        <div class="compare-col">
+          <div class="compare-col-header new">🟢 候选 Prompt（新）</div>
+          <div class="compare-body" id="new-${i}"><div class="compare-loading"><div class="spinner"></div>生成中…</div></div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  try {
+    const r = await fetch('/api/prompt-candidates/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidate_id: candId, questions }),
+    });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.detail || '对比失败');
+
+    d.comparisons.forEach((comp, i) => {
+      document.getElementById(`old-${i}`).textContent = comp.old_answer;
+      document.getElementById(`new-${i}`).textContent = comp.new_answer;
+    });
+  } catch (e) {
+    results.innerHTML += `<div style="color:var(--danger);font-size:13px;margin-top:12px;">❌ ${e.message}</div>`;
+    // 清空 loading 状态
+    questions.forEach((_, i) => {
+      const el = document.getElementById(`old-${i}`);
+      const el2 = document.getElementById(`new-${i}`);
+      if (el && el.querySelector('.compare-loading')) el.textContent = '（调用失败）';
+      if (el2 && el2.querySelector('.compare-loading')) el2.textContent = '（调用失败）';
+    });
+  }
+
+  btn.disabled = false;
+  btn.textContent = '▶ 开始对比';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 加入 Benchmark
+// ═══════════════════════════════════════════════════════════════════
+
+let _bmKeywords = [];
+
+function openBmModal(question) {
+  _bmKeywords = [];
+  document.getElementById('bm-question').value = question;
+  document.getElementById('bm-category').value = '人工验证';
+  document.getElementById('bm-kw-input').value = '';
+  document.getElementById('bm-kw-tags').innerHTML = '';
+  document.getElementById('bm-result').style.display = 'none';
+  document.getElementById('bm-modal').style.display = 'flex';
+}
+
+function closeBmModal() {
+  document.getElementById('bm-modal').style.display = 'none';
+}
+
+function addKw(event) {
+  if (event.key !== 'Enter') return;
+  const input = document.getElementById('bm-kw-input');
+  const kw = input.value.trim();
+  if (!kw || _bmKeywords.includes(kw)) { input.value = ''; return; }
+  _bmKeywords.push(kw);
+  input.value = '';
+  renderKwTags();
+}
+
+function removeKw(kw) {
+  _bmKeywords = _bmKeywords.filter(k => k !== kw);
+  renderKwTags();
+}
+
+function renderKwTags() {
+  document.getElementById('bm-kw-tags').innerHTML = _bmKeywords.map(k => `
+    <span class="kw-tag">${escHtml(k)}<button onclick="removeKw(${JSON.stringify(k)})">×</button></span>
+  `).join('');
+}
+
+async function submitBenchmark() {
+  if (!_bmKeywords.length) { alert('请至少添加一个预期关键词'); return; }
+  const resultEl = document.getElementById('bm-result');
+  resultEl.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/benchmark/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: document.getElementById('bm-question').value,
+        category: document.getElementById('bm-category').value,
+        expected_keywords: _bmKeywords,
+      }),
+    });
+    const d = await r.json();
+    resultEl.style.display = 'block';
+    if (d.success) {
+      resultEl.style.color = 'var(--success)';
+      resultEl.textContent = `✅ ${d.message}`;
+      setTimeout(closeBmModal, 1500);
+    } else {
+      resultEl.style.color = 'var(--danger)';
+      resultEl.textContent = `❌ ${d.detail}`;
+    }
+  } catch (e) {
+    resultEl.style.display = 'block';
+    resultEl.style.color = 'var(--danger)';
+    resultEl.textContent = `❌ ${e.message}`;
+  }
+}
+
+// ── 工具函数 ──────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 点击遮罩关闭 modal
+document.getElementById('bm-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeBmModal();
+});
 </script>
 </body>
 </html>

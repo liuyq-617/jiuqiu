@@ -13,6 +13,8 @@ import json
 import logging
 import time
 import hashlib
+import datetime
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -41,8 +43,53 @@ from app.rag import answer, answer_stream
 from app.vector_store import connect_milvus, ensure_collection, get_aggregate_stats, build_index, clear_index
 from app.document_loader import load_and_split, process_uploaded_file
 from app.feishu_bot import start_ws_client
-from app.feedback import init_db, save_qa, save_thumbs, save_manual_scores, trigger_judge, get_stats as get_feedback_stats
+from app.feedback import init_db, save_qa, save_thumbs, save_manual_scores, trigger_judge, get_stats as get_feedback_stats, list_prompt_candidates, review_prompt_candidate
 from app.advanced_rag import _init_jieba
+
+
+class PromptReviewRequest(BaseModel):
+    note: Optional[str] = Field(default="", description="审批备注（可选）")
+
+
+# ========== Prompt 优化器每日调度器 ==========
+
+def _start_prompt_optimizer_scheduler() -> None:
+    """
+    启动每日 03:00 自动运行 Prompt 优化器的后台守护线程。
+    首次启动时计算到下一个 03:00 的等待时长，之后每 24h 循环。
+    """
+    def _scheduler_loop():
+        while True:
+            now = datetime.datetime.now()
+            target = now.replace(hour=3, minute=0, second=0, microsecond=0)
+            if now >= target:
+                target += datetime.timedelta(days=1)
+            sleep_secs = (target - now).total_seconds()
+            logger.info(
+                "[optimizer-scheduler] 下次运行时间: %s（%.0f 秒后）",
+                target.strftime("%Y-%m-%d %H:%M:%S"),
+                sleep_secs,
+            )
+            time.sleep(sleep_secs)
+
+            try:
+                # 延迟导入，避免启动时 scripts/ 路径问题
+                from scripts.prompt_optimizer import run_optimizer
+                logger.info("[optimizer-scheduler] 开始执行 Prompt 优化器")
+                result = run_optimizer(min_samples=5, days=7, dry_run=False)
+                logger.info("[optimizer-scheduler] 执行完成: %s", result)
+            except Exception as e:
+                logger.error("[optimizer-scheduler] 优化器执行失败: %s", e, exc_info=True)
+
+            time.sleep(24 * 3600)  # 防止 03:00 整秒内重复触发
+
+    t = threading.Thread(
+        target=_scheduler_loop,
+        daemon=True,
+        name="prompt-optimizer-scheduler",
+    )
+    t.start()
+    logger.info("[optimizer-scheduler] 后台调度线程已启动")
 
 
 # ========== 应用生命周期 ==========
@@ -70,6 +117,7 @@ async def lifespan(app: FastAPI):
     _cleanup_old_temp_files()
     # 预热 jieba 分词器（首次加载词典约 0.5s，避免第一次检索时卡顿）
     _init_jieba()
+    _start_prompt_optimizer_scheduler()   # 每日 03:00 自动运行 Prompt 优化器
     yield
 
 # ========== OpenAPI Tags ==========
@@ -283,6 +331,7 @@ async def chat(req: ChatRequest):
         sources = result.get("sources", [])
         if answer_text:
             aid = save_qa(req.question, answer_text, sources, response_ms)
+            trigger_judge(aid)   # 问答结束后立即异步触发 LLM 评分
             result["answer_id"] = aid
         return {"success": True, "data": result}
     except ConnectionError as e:
@@ -342,6 +391,7 @@ async def chat_stream(req: ChatRequest):
         full_answer = "".join(tokens).strip()
         if full_answer:
             aid = save_qa(req.question, full_answer, sources, response_ms)
+            trigger_judge(aid)   # 问答结束后立即异步触发 LLM 评分
             yield f"data: {json.dumps({'type': 'answer_id', 'id': aid}, ensure_ascii=False)}\n\n"
 
     try:
@@ -1065,6 +1115,238 @@ async def feedback_stats():
     except Exception as e:
         logger.error(f"[feedback_stats] 失败: {e}", exc_info=True)
         return {"success": False, "detail": str(e)}
+
+
+# ========== Prompt 候选管理 ==========
+
+@app.get(
+    "/api/prompt-candidates",
+    summary="列出 Prompt 候选",
+    description=(
+        "返回 prompt_candidates 表中的候选记录。\n\n"
+        "可用 `?status=pending` / `?status=approved` / `?status=rejected` 过滤；"
+        "不传参数返回全部记录（按 created_at DESC）。"
+    ),
+    operation_id="listPromptCandidates",
+    tags=["质量评价"],
+)
+async def list_candidates(status: Optional[str] = None):
+    """列出 Prompt 候选（可按 status 过滤）"""
+    try:
+        rows = list_prompt_candidates(status=status)
+        return {"success": True, "count": len(rows), "data": rows}
+    except Exception as e:
+        logger.error("[list_candidates] 失败: %s", e, exc_info=True)
+        return {"success": False, "detail": str(e)}
+
+
+@app.post(
+    "/api/prompt-candidates/{candidate_id}/approve",
+    summary="审批通过 Prompt 候选",
+    description=(
+        "将指定候选的 status 设为 'approved'，记录 reviewed_at。\n\n"
+        "审批后 rag.py 在 60 秒内自动切换到新 Prompt（无需重启服务）。"
+    ),
+    operation_id="approvePromptCandidate",
+    tags=["质量评价"],
+)
+async def approve_candidate(candidate_id: str, req: PromptReviewRequest = None):
+    """审批通过 Prompt 候选"""
+    try:
+        note = (req.note or "") if req else ""
+        ok = review_prompt_candidate(candidate_id, action="approved", note=note)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"找不到 candidate_id={candidate_id}")
+        return {"success": True, "candidate_id": candidate_id, "status": "approved"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[approve_candidate] 失败: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/api/prompt-candidates/{candidate_id}/reject",
+    summary="拒绝 Prompt 候选",
+    description="将指定候选的 status 设为 'rejected'，记录 reviewed_at 和备注。",
+    operation_id="rejectPromptCandidate",
+    tags=["质量评价"],
+)
+async def reject_candidate(candidate_id: str, req: PromptReviewRequest = None):
+    """拒绝 Prompt 候选"""
+    try:
+        note = (req.note or "") if req else ""
+        ok = review_prompt_candidate(candidate_id, action="rejected", note=note)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"找不到 candidate_id={candidate_id}")
+        return {"success": True, "candidate_id": candidate_id, "status": "rejected"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[reject_candidate] 失败: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class PromptPreviewRequest(BaseModel):
+    candidate_id: str = Field(..., description="要对比的 prompt_candidates ID")
+    questions: List[str] = Field(..., min_length=1, max_length=5, description="用于对比的问题列表（最多5条）")
+
+
+@app.post(
+    "/api/prompt-candidates/preview",
+    summary="新旧 Prompt 回答对比",
+    description=(
+        "用同一批问题分别调用当前默认 SYSTEM_PROMPT 和指定候选 Prompt，"
+        "返回两组回答供人工对比，辅助判断是否应 approve 该候选。\n\n"
+        "- `old_answers`：使用当前默认 SYSTEM_PROMPT 的回答\n"
+        "- `new_answers`：使用候选 suggestion 的回答\n\n"
+        "**注意**：每个问题会触发两次 LLM 调用，请控制问题数量（建议 1-3 条）。"
+    ),
+    operation_id="previewPromptCandidate",
+    tags=["质量评价"],
+)
+async def preview_prompt_candidate(req: PromptPreviewRequest):
+    """用指定问题列表对比旧/新 prompt 的回答效果"""
+    from app.rag import SYSTEM_PROMPT, build_messages, build_context, extract_filters, \
+        _is_ranking_question, _is_evaluation_question, _is_aggregate_question, \
+        _is_industry_scenario_question, answer
+    from app.feedback import _get_conn, _db_lock
+    from app.chat_client import get_chat_client
+
+    # 取候选 prompt
+    try:
+        with _db_lock, _get_conn() as conn:
+            row = conn.execute(
+                "SELECT suggestion, route, avg_score_before FROM prompt_candidates WHERE id=?",
+                (req.candidate_id,),
+            ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"找不到 candidate_id={req.candidate_id}")
+        candidate_prompt = row["suggestion"]
+        candidate_route  = row["route"]
+        avg_score_before = row["avg_score_before"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取候选失败: {e}")
+
+    client = get_chat_client()
+
+    async def _run_one(question: str, system_prompt: str) -> str:
+        """用指定 system prompt 回答问题（复用 RAG 检索，只替换 system 层）"""
+        import asyncio, concurrent.futures
+        loop = asyncio.get_event_loop()
+
+        def _sync():
+            # 复用完整 answer() 但替换 system prompt
+            result = answer(question)
+            # 重新组装 messages 以替换 system
+            from app.rag import build_context
+            ctx = build_context(result.get("hits", []))
+            msgs = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": (
+                    f"请根据以下 CRM 活动记录回答问题。\n\n"
+                    f"=== CRM 活动记录 ===\n{ctx}\n\n"
+                    f"=== 用户问题 ===\n{question}\n"
+                )},
+            ]
+            data = client.complete(msgs, timeout=60)
+            return client.extract_answer(data)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            return await loop.run_in_executor(ex, _sync)
+
+    results = []
+    for q in req.questions[:5]:
+        try:
+            old_ans = await _run_one(q, SYSTEM_PROMPT)
+        except Exception as e:
+            old_ans = f"[调用失败: {e}]"
+        try:
+            new_ans = await _run_one(q, candidate_prompt)
+        except Exception as e:
+            new_ans = f"[调用失败: {e}]"
+        results.append({
+            "question": q,
+            "old_answer": old_ans,
+            "new_answer": new_ans,
+        })
+
+    return {
+        "success": True,
+        "candidate_id": req.candidate_id,
+        "route": candidate_route,
+        "avg_score_before": avg_score_before,
+        "comparisons": results,
+    }
+
+
+@app.post(
+    "/api/benchmark/add",
+    summary="将问题加入基准测试集",
+    description=(
+        "将一条问题和预期关键词追加写入 `scripts/benchmark.py` 的 `BENCHMARK_CASES` 列表。\n\n"
+        "适合在 Prompt 对比验证后，将有价值的问题沉淀为回归测试用例。"
+    ),
+    operation_id="addBenchmarkCase",
+    tags=["质量评价"],
+)
+async def add_benchmark_case(req: dict):
+    """将问题追加到 benchmark.py 的 BENCHMARK_CASES"""
+    question = (req.get("question") or "").strip()
+    keywords = req.get("expected_keywords") or []
+    category = (req.get("category") or "人工添加").strip()
+
+    if not question:
+        raise HTTPException(status_code=422, detail="question 不能为空")
+    if not isinstance(keywords, list) or not keywords:
+        raise HTTPException(status_code=422, detail="expected_keywords 不能为空列表")
+
+    bm_path = BASE_DIR / "scripts" / "benchmark.py"
+    if not bm_path.exists():
+        raise HTTPException(status_code=500, detail="找不到 scripts/benchmark.py")
+
+    # 读取文件，在 BENCHMARK_CASES 列表末尾 ']' 前插入新条目
+    content = bm_path.read_text(encoding="utf-8")
+    marker = "]  # END_BENCHMARK_CASES"
+
+    # 检查是否已存在相同问题（避免重复）
+    if question in content:
+        return {"success": False, "detail": "该问题已存在于 benchmark.py 中"}
+
+    kw_repr = json.dumps(keywords, ensure_ascii=False)
+    new_case = (
+        f"    # ── 人工验证添加 ──────────────────────────────────────────\n"
+        f"    {{\n"
+        f"        \"category\": {json.dumps(category, ensure_ascii=False)},\n"
+        f"        \"question\": {json.dumps(question, ensure_ascii=False)},\n"
+        f"        \"expected_keywords\": {kw_repr},\n"
+        f"    }},\n"
+    )
+
+    # 找插入位置：BENCHMARK_CASES 列表的最后一个 ']' 前
+    # 查找 ]\n\n 模式（列表结束处）
+    import re
+    pattern = r'(\]\s*\n\n\n# ========== LLM-as-Judge)'
+    match = re.search(pattern, content)
+    if match:
+        insert_pos = match.start() + 1  # 在 ] 之前插入
+        new_content = content[:insert_pos] + "\n" + new_case + content[insert_pos:]
+    else:
+        # fallback：追加到文件末尾前，并告知用户
+        return {"success": False, "detail": "未找到插入锚点，请手动编辑 benchmark.py"}
+
+    bm_path.write_text(new_content, encoding="utf-8")
+    logger.info("[add_benchmark] 新增测试用例: %s", question[:60])
+
+    return {
+        "success": True,
+        "question": question,
+        "category": category,
+        "expected_keywords": keywords,
+        "message": "已追加到 scripts/benchmark.py",
+    }
 
 
 @app.get(
