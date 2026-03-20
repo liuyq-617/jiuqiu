@@ -613,38 +613,38 @@ def build_messages(question: str, context: str, sort_by: str = "relevance") -> L
     ]
 
 
-def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
-    """普通问答（非流式），返回完整 JSON"""
-    logger.info(f"[answer] 问题: {question}")
+def retrieve_context(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
+    """路由 + 检索，返回 context 所需的全部中间产物，不触发任何 LLM 调用。
 
-    # --- 路由优先级判断 ---
+    返回值字段：
+        context (str)               — 拼好的上下文字符串
+        sources (list[str])         — 来源文件列表
+        hits    (list[dict])        — 原始检索片段
+        sort_by (str)               — 'relevance' | 'date'
+        is_industry_scenario (bool) — 是否走行业场景路由
+    """
     is_industry_scenario = False
     sort_by = "relevance"
+    hits: List[Dict[str, Any]] = []
+
     if _is_ranking_question(question):
-        # 活跃度/数量排名类：统计各实体activity记录数
-        logger.info("[answer] 检测到活跃度排名问题，统计活动记录数量")
+        logger.info("[retrieve] 检测到活跃度排名问题，统计活动记录数量")
         context, sources = _build_ranking_context(question)
-        hits = []
     elif _is_evaluation_question(question):
-        # 多人评价排名类：逐人拉取活动明细
-        logger.info("[answer] 检测到多人评价/排名问题，逐人拉取活动明细")
+        logger.info("[retrieve] 检测到多人评价/排名问题，逐人拉取活动明细")
         context, sources = _build_evaluation_context(question)
-        hits = []
     elif _is_aggregate_question(question):
-        # 全量统计类：多少客户/负责人
-        logger.info("[answer] 检测到聚合统计问题，使用全量元数据查询")
+        logger.info("[retrieve] 检测到聚合统计问题，使用全量元数据查询")
         context, sources = _build_aggregate_context(question)
-        hits = []
     elif _is_industry_scenario_question(question):
-        # 行业场景汇总类：按行业关键词过滤所有相关客户记录
-        logger.info("[answer] 检测到行业场景汇总问题，按行业关键词过滤客户记录")
+        logger.info("[retrieve] 检测到行业场景汇总问题，按行业关键词过滤客户记录")
         ctx, srcs = _build_industry_scenario_context(question)
         if ctx is not None:
-            context, sources, hits = ctx, srcs, []
+            context, sources = ctx, srcs
             is_industry_scenario = True
         else:
             # 降级：关键词提取失败，走语义检索
-            logger.info("[answer] 行业关键词提取失败，降级到语义检索")
+            logger.info("[retrieve] 行业关键词提取失败，降级到语义检索")
             if ADVANCED_RAG_ENABLED:
                 hits = advanced_retrieve(question, top_k=top_k)
             else:
@@ -657,16 +657,15 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
         has_filter = bool(filters["owner"] or filters["date_from"])
 
         if has_filter:
-            # 元数据过滤类：指定负责人/日期，精确匹配
-            logger.info(f"[answer] 元数据过滤检索: owner={filters['owner']!r}  "
+            logger.info(f"[retrieve] 元数据过滤检索: owner={filters['owner']!r}  "
                         f"date={filters['date_from']} ~ {filters['date_to']}")
             hits = query_by_metadata(
                 owner=filters["owner"],
                 date_from=filters["date_from"],
                 date_to=filters["date_to"],
-                limit=top_k * 8,  # 全量匹配，多取一些
+                limit=top_k * 8,
             )
-            logger.info(f"[answer] 元数据查询匹配 {len(hits)} 条")
+            logger.info(f"[retrieve] 元数据查询匹配 {len(hits)} 条")
             if not hits:
                 context = (
                     f"未在知识库中找到"
@@ -682,17 +681,35 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
             # 语义检索（普通 or Advanced RAG）
             if ADVANCED_RAG_ENABLED:
                 hits = advanced_retrieve(question, top_k=top_k)
-                logger.info(f"[answer] Advanced RAG 检索到 {len(hits)} 条相关片段")
+                logger.info(f"[retrieve] Advanced RAG 检索到 {len(hits)} 条相关片段")
             else:
                 hits = search(question, top_k=top_k)
-                logger.info(f"[answer] 语义检索到 {len(hits)} 条相关片段")
-            # 摘要模式：用摘要检索，用原文生成回答
+                logger.info(f"[retrieve] 语义检索到 {len(hits)} 条相关片段")
             if SUMMARY_RAG_ENABLED and hits:
                 hits = fetch_originals(hits)
-                logger.info(f"[answer] 摘要模式：已替换为 {len(hits)} 条原始记录")
+                logger.info(f"[retrieve] 摘要模式：已替换为 {len(hits)} 条原始记录")
             context = build_context(hits)
             sources = list({h["source"] for h in hits})
-            sort_by = "relevance"
+
+    return {
+        "context": context,
+        "sources": sources,
+        "hits":    hits,
+        "sort_by": sort_by,
+        "is_industry_scenario": is_industry_scenario,
+    }
+
+
+def answer(question: str, top_k: int = TOP_K) -> Dict[str, Any]:
+    """普通问答（非流式），返回完整 JSON"""
+    logger.info(f"[answer] 问题: {question}")
+
+    r = retrieve_context(question, top_k=top_k)
+    context              = r["context"]
+    sources              = r["sources"]
+    hits                 = r["hits"]
+    sort_by              = r["sort_by"]
+    is_industry_scenario = r["is_industry_scenario"]
 
     if is_industry_scenario:
         messages = build_industry_scenario_messages(question, context)

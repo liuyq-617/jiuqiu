@@ -411,6 +411,7 @@
   </div>
   <nav class="nav-links">
     <a href="/" class="nav-link">💬 问答</a>
+    <a href="/#quality-card" class="nav-link">📊 评价看板</a>
     <a href="/upload" class="nav-link">📤 上传文件</a>
   </nav>
 </header>
@@ -439,6 +440,13 @@
       <div class="stat-value" style="font-size:15px;padding-top:4px;" id="stat-collection">—</div>
       <div class="stat-sub">Milvus collection</div>
     </div>
+  </div>
+
+  <!-- 快捷导航 -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:4px;">
+    <a href="/#quality-card" class="btn btn-outline btn-sm" style="text-decoration:none;">📊 评价看板</a>
+    <a href="#section-candidates" class="btn btn-outline btn-sm" style="text-decoration:none;">🧠 Prompt 审核</a>
+    <a href="#section-sandbox" class="btn btn-outline btn-sm" style="text-decoration:none;">🔬 效果沙箱</a>
   </div>
 
   <!-- 清空向量库 -->
@@ -507,12 +515,18 @@
 
     <hr />
 
-    <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">客户公司列表</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:13px;color:var(--muted);">客户公司列表</div>
+      <button id="company-toggle" onclick="toggleTagList('company')" style="display:none;font-size:12px;color:var(--primary);background:none;border:none;cursor:pointer;padding:0;"></button>
+    </div>
     <div class="tag-list" id="company-list"><span style="color:var(--muted);font-size:12px;">加载中…</span></div>
 
     <hr />
 
-    <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">负责人列表</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:13px;color:var(--muted);">负责人列表</div>
+      <button id="owner-toggle" onclick="toggleTagList('owner')" style="display:none;font-size:12px;color:var(--primary);background:none;border:none;cursor:pointer;padding:0;"></button>
+    </div>
     <div class="tag-list" id="owner-list"><span style="color:var(--muted);font-size:12px;">加载中…</span></div>
   </div>
 
@@ -652,6 +666,48 @@ function setResult(el, msg, type /* ok | error | info */) {
   el.textContent = msg;
 }
 
+// ── Tag List helpers ──────────────────────────────────────────────────
+const TAG_COLLAPSE_LIMIT = 8;
+const _tagExpanded = {};   // { 'company': false, 'owner': false }
+
+function renderTagList(key, items) {
+  const listEl   = document.getElementById(`${key}-list`);
+  const toggleEl = document.getElementById(`${key}-toggle`);
+  listEl.innerHTML = '';
+
+  if (!items.length) {
+    listEl.innerHTML = '<span style="color:var(--muted);font-size:12px;">（暂无数据）</span>';
+    toggleEl.style.display = 'none';
+    return;
+  }
+
+  const expanded = !!_tagExpanded[key];
+  const show = expanded ? items : items.slice(0, TAG_COLLAPSE_LIMIT);
+
+  show.forEach(name => {
+    const t = document.createElement('span');
+    t.className = 'tag';
+    t.textContent = name;
+    listEl.appendChild(t);
+  });
+
+  if (items.length > TAG_COLLAPSE_LIMIT) {
+    toggleEl.style.display = '';
+    const hidden = items.length - TAG_COLLAPSE_LIMIT;
+    toggleEl.textContent = expanded ? '收起 ▲' : `展开全部 ${items.length} 个 ▼`;
+    toggleEl.dataset.items = JSON.stringify(items);
+  } else {
+    toggleEl.style.display = 'none';
+  }
+}
+
+function toggleTagList(key) {
+  _tagExpanded[key] = !_tagExpanded[key];
+  const toggleEl = document.getElementById(`${key}-toggle`);
+  const items = JSON.parse(toggleEl.dataset.items || '[]');
+  renderTagList(key, items);
+}
+
 // ── Load Stats ────────────────────────────────────────────────────────
 async function loadStats() {
   try {
@@ -674,25 +730,8 @@ async function loadStats() {
     }
 
     // tag lists
-    const companyList = document.getElementById('company-list');
-    companyList.innerHTML = '';
-    (d.companies || []).forEach(c => {
-      const t = document.createElement('span');
-      t.className = 'tag';
-      t.textContent = c;
-      companyList.appendChild(t);
-    });
-    if (!d.companies?.length) companyList.innerHTML = '<span style="color:var(--muted);font-size:12px;">（暂无数据）</span>';
-
-    const ownerList = document.getElementById('owner-list');
-    ownerList.innerHTML = '';
-    (d.owners || []).forEach(o => {
-      const t = document.createElement('span');
-      t.className = 'tag';
-      t.textContent = o;
-      ownerList.appendChild(t);
-    });
-    if (!d.owners?.length) ownerList.innerHTML = '<span style="color:var(--muted);font-size:12px;">（暂无数据）</span>';
+    renderTagList('company', d.companies || []);
+    renderTagList('owner', d.owners || []);
 
   } catch (e) {
     document.getElementById('stat-chunks').textContent = '!';

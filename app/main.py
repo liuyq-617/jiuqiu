@@ -1209,7 +1209,7 @@ async def preview_prompt_candidate(req: PromptPreviewRequest):
     """用指定问题列表对比旧/新 prompt 的回答效果"""
     from app.rag import SYSTEM_PROMPT, build_messages, build_context, extract_filters, \
         _is_ranking_question, _is_evaluation_question, _is_aggregate_question, \
-        _is_industry_scenario_question, answer
+        _is_industry_scenario_question, answer, _load_active_prompt
     from app.feedback import _get_conn, _db_lock
     from app.chat_client import get_chat_client
 
@@ -1234,24 +1234,20 @@ async def preview_prompt_candidate(req: PromptPreviewRequest):
     from app.feedback import _call_judge_llm
 
     async def _run_one(question: str, system_prompt: str) -> str:
-        """用指定 system prompt 回答问题（复用 RAG 检索，只替换 system 层）"""
+        """用指定 system prompt 回答问题：一次检索 + 一次 LLM 调用"""
         import asyncio, concurrent.futures
         loop = asyncio.get_event_loop()
 
         def _sync():
-            # 复用完整 answer() 但替换 system prompt
-            result = answer(question)
-            # 重新组装 messages 以替换 system
-            from app.rag import build_context
-            ctx = build_context(result.get("hits", []))
-            msgs = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": (
-                    f"请根据以下 CRM 活动记录回答问题。\n\n"
-                    f"=== CRM 活动记录 ===\n{ctx}\n\n"
-                    f"=== 用户问题 ===\n{question}\n"
-                )},
-            ]
+            from app.rag import retrieve_context, build_messages, build_industry_scenario_messages
+            r = retrieve_context(question)
+            # 替换 system prompt 后重新组装 messages
+            if r["is_industry_scenario"]:
+                msgs = build_industry_scenario_messages(question, r["context"])
+                msgs[0] = {"role": "system", "content": system_prompt}
+            else:
+                msgs = build_messages(question, r["context"], sort_by=r["sort_by"])
+                msgs[0] = {"role": "system", "content": system_prompt}
             data = client.complete(msgs, timeout=60)
             return client.extract_answer(data)
 
@@ -1276,11 +1272,14 @@ async def preview_prompt_candidate(req: PromptPreviewRequest):
     results = []
     old_avgs, new_avgs = [], []
 
+    # 取线上当前实际生效的 prompt 作为对比基线（含热加载结果，而非硬编码常量）
+    active_prompt = _load_active_prompt()
+
     for q in req.questions[:5]:
         # ── 1. 生成回答（并行）──────────────────────────────────────────
         import asyncio
         old_ans, new_ans = await asyncio.gather(
-            _run_one(q, SYSTEM_PROMPT),
+            _run_one(q, active_prompt),
             _run_one(q, candidate_prompt),
             return_exceptions=True,
         )
