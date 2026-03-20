@@ -1375,17 +1375,13 @@ async def add_benchmark_case(req: dict):
         f"    }},\n"
     )
 
-    # 找插入位置：BENCHMARK_CASES 列表的最后一个 ']' 前
-    # 查找 ]\n\n 模式（列表结束处）
-    import re
-    pattern = r'(\]\s*\n\n\n# ========== LLM-as-Judge)'
-    match = re.search(pattern, content)
-    if match:
-        insert_pos = match.start() + 1  # 在 ] 之前插入
-        new_content = content[:insert_pos] + "\n" + new_case + content[insert_pos:]
-    else:
-        # fallback：追加到文件末尾前，并告知用户
+    # 找插入位置：在 BENCHMARK_CASES 列表结束标记行（marker）之前
+    marker_index = content.find(marker)
+    if marker_index == -1:
         return {"success": False, "detail": "未找到插入锚点，请手动编辑 benchmark.py"}
+    # 在 ']' 之前插入新条目，确保仍位于列表内部
+    insert_pos = marker_index
+    new_content = content[:insert_pos] + "\n" + new_case + content[insert_pos:]
 
     bm_path.write_text(new_content, encoding="utf-8")
     logger.info("[add_benchmark] 新增测试用例: %s", question[:60])
