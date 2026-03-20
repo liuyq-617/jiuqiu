@@ -1231,6 +1231,7 @@ async def preview_prompt_candidate(req: PromptPreviewRequest):
         raise HTTPException(status_code=500, detail=f"读取候选失败: {e}")
 
     client = get_chat_client()
+    from app.feedback import _call_judge_llm
 
     async def _run_one(question: str, system_prompt: str) -> str:
         """用指定 system prompt 回答问题（复用 RAG 检索，只替换 system 层）"""
@@ -1257,28 +1258,77 @@ async def preview_prompt_candidate(req: PromptPreviewRequest):
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
             return await loop.run_in_executor(ex, _sync)
 
+    async def _judge_one(question: str, answer_text: str) -> dict | None:
+        """异步包装 _call_judge_llm（它是同步 httpx 调用）"""
+        import asyncio, concurrent.futures
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            return await loop.run_in_executor(ex, _call_judge_llm, question, answer_text)
+
+    def _avg(scores: dict | None) -> float | None:
+        if not scores:
+            return None
+        vals = [scores.get(k) for k in ("relevance", "completeness", "accuracy")]
+        if any(v is None for v in vals):
+            return None
+        return round(sum(vals) / 3, 2)
+
     results = []
+    old_avgs, new_avgs = [], []
+
     for q in req.questions[:5]:
-        try:
-            old_ans = await _run_one(q, SYSTEM_PROMPT)
-        except Exception as e:
-            old_ans = f"[调用失败: {e}]"
-        try:
-            new_ans = await _run_one(q, candidate_prompt)
-        except Exception as e:
-            new_ans = f"[调用失败: {e}]"
+        # ── 1. 生成回答（并行）──────────────────────────────────────────
+        import asyncio
+        old_ans, new_ans = await asyncio.gather(
+            _run_one(q, SYSTEM_PROMPT),
+            _run_one(q, candidate_prompt),
+            return_exceptions=True,
+        )
+        if isinstance(old_ans, Exception):
+            old_ans = f"[调用失败: {old_ans}]"
+        if isinstance(new_ans, Exception):
+            new_ans = f"[调用失败: {new_ans}]"
+
+        # ── 2. LLM 评分（并行）──────────────────────────────────────────
+        old_scores_raw, new_scores_raw = await asyncio.gather(
+            _judge_one(q, old_ans) if isinstance(old_ans, str) and not old_ans.startswith("[调用失败") else asyncio.sleep(0),
+            _judge_one(q, new_ans) if isinstance(new_ans, str) and not new_ans.startswith("[调用失败") else asyncio.sleep(0),
+            return_exceptions=True,
+        )
+        old_scores = old_scores_raw if isinstance(old_scores_raw, dict) else None
+        new_scores = new_scores_raw if isinstance(new_scores_raw, dict) else None
+
+        old_avg = _avg(old_scores)
+        new_avg = _avg(new_scores)
+        if old_avg is not None:
+            old_avgs.append(old_avg)
+        if new_avg is not None:
+            new_avgs.append(new_avg)
+
         results.append({
-            "question": q,
+            "question":   q,
             "old_answer": old_ans,
             "new_answer": new_ans,
+            "old_scores": old_scores,
+            "new_scores": new_scores,
+            "old_avg":    old_avg,
+            "new_avg":    new_avg,
         })
 
+    # ── 3. 汇总均分 ──────────────────────────────────────────────────────
+    overall_old = round(sum(old_avgs) / len(old_avgs), 2) if old_avgs else None
+    overall_new = round(sum(new_avgs) / len(new_avgs), 2) if new_avgs else None
+    delta = round(overall_new - overall_old, 2) if (overall_old is not None and overall_new is not None) else None
+
     return {
-        "success": True,
-        "candidate_id": req.candidate_id,
-        "route": candidate_route,
+        "success":        True,
+        "candidate_id":   req.candidate_id,
+        "route":          candidate_route,
         "avg_score_before": avg_score_before,
-        "comparisons": results,
+        "overall_old":    overall_old,
+        "overall_new":    overall_new,
+        "delta":          delta,
+        "comparisons":    results,
     }
 
 

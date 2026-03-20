@@ -259,6 +259,30 @@
       background: #fef3c7; color: #92400e;
       font-size: 11px; padding: 3px 10px; border-radius: 20px;
     }
+    /* 沙箱评分相关 */
+    .judge-bar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin-top: 10px; padding: 10px 14px;
+      background: #f8fafc; border-radius: 8px;
+      border: 1px solid var(--border); font-size: 12px;
+    }
+    .judge-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    }
+    .judge-pill.good  { background:#dcfce7; color:#166534; }
+    .judge-pill.ok    { background:#fef9c3; color:#854d0e; }
+    .judge-pill.bad   { background:#fee2e2; color:#991b1b; }
+    .judge-pill.na    { background:#f1f5f9; color:#94a3b8; }
+    .delta-pos { color: #16a34a; font-weight: 700; }
+    .delta-neg { color: #dc2626; font-weight: 700; }
+    .delta-flat{ color: #64748b; font-weight: 700; }
+    .summary-bar {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      margin-bottom: 18px; padding: 12px 16px;
+      background: linear-gradient(135deg, #f0fdf4, #eff6ff);
+      border: 1px solid #bbf7d0; border-radius: 10px; font-size: 13px;
+    }
     .ts-badge {
       font-size: 11px; color: var(--muted);
     }
@@ -961,10 +985,10 @@ async function runSandbox() {
   const btn = document.getElementById('sandbox-btn');
   const results = document.getElementById('sandbox-results');
   btn.disabled = true;
-  btn.textContent = '对比中…';
+  btn.textContent = '评分中…';
 
-  // 先渲染骨架
-  results.innerHTML = questions.map((q, i) => `
+  // 先渲染骨架（含评分 loading 占位）
+  results.innerHTML = `<div id="summary-bar-wrap"></div>` + questions.map((q, i) => `
     <div style="margin-bottom:24px;">
       <div style="font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span>问题 ${i+1}：${escHtml(q)}</span>
@@ -974,15 +998,29 @@ async function runSandbox() {
       <div class="compare-grid">
         <div class="compare-col">
           <div class="compare-col-header old">🔴 当前 Prompt（旧）</div>
-          <div class="compare-body" id="old-${i}"><div class="compare-loading"><div class="spinner"></div>生成中…</div></div>
+          <div class="compare-body" id="old-${i}"><div class="compare-loading"><div class="spinner"></div>生成 + 评分中…</div></div>
+          <div id="old-score-${i}" class="judge-bar" style="display:none;"></div>
         </div>
         <div class="compare-col">
           <div class="compare-col-header new">🟢 候选 Prompt（新）</div>
-          <div class="compare-body" id="new-${i}"><div class="compare-loading"><div class="spinner"></div>生成中…</div></div>
+          <div class="compare-body" id="new-${i}"><div class="compare-loading"><div class="spinner"></div>生成 + 评分中…</div></div>
+          <div id="new-score-${i}" class="judge-bar" style="display:none;"></div>
         </div>
       </div>
     </div>
   `).join('');
+
+  // 构建评分徽章 HTML
+  function scorePill(label, val) {
+    if (val == null) return `<span class="judge-pill na">${label} —</span>`;
+    const cls = val >= 4 ? 'good' : val >= 3 ? 'ok' : 'bad';
+    return `<span class="judge-pill ${cls}">${label} ${val.toFixed(1)}</span>`;
+  }
+  function avgPill(avg) {
+    if (avg == null) return `<span class="judge-pill na">均分 —</span>`;
+    const cls = avg >= 4 ? 'good' : avg >= 3 ? 'ok' : 'bad';
+    return `<span class="judge-pill ${cls}" style="font-size:12px;">均分 ${avg.toFixed(2)}</span>`;
+  }
 
   try {
     const r = await fetch('/api/prompt-candidates/preview', {
@@ -993,10 +1031,52 @@ async function runSandbox() {
     const d = await r.json();
     if (!d.success) throw new Error(d.detail || '对比失败');
 
+    // 填充每题回答 + 评分
     d.comparisons.forEach((comp, i) => {
       document.getElementById(`old-${i}`).textContent = comp.old_answer;
       document.getElementById(`new-${i}`).textContent = comp.new_answer;
+
+      // 旧 prompt 评分
+      const os = comp.old_scores;
+      const oldBar = document.getElementById(`old-score-${i}`);
+      oldBar.innerHTML = os
+        ? scorePill('相关', os.relevance) + scorePill('完整', os.completeness) + scorePill('准确', os.accuracy)
+          + `<span style="flex:1"></span>` + avgPill(comp.old_avg)
+          + (os.comment ? `<span style="color:var(--muted);font-size:11px;margin-left:4px;">${escHtml(os.comment)}</span>` : '')
+        : `<span class="judge-pill na">评分不可用</span>`;
+      oldBar.style.display = 'flex';
+
+      // 新 prompt 评分
+      const ns = comp.new_scores;
+      const newBar = document.getElementById(`new-score-${i}`);
+      newBar.innerHTML = ns
+        ? scorePill('相关', ns.relevance) + scorePill('完整', ns.completeness) + scorePill('准确', ns.accuracy)
+          + `<span style="flex:1"></span>` + avgPill(comp.new_avg)
+          + (ns.comment ? `<span style="color:var(--muted);font-size:11px;margin-left:4px;">${escHtml(ns.comment)}</span>` : '')
+        : `<span class="judge-pill na">评分不可用</span>`;
+      newBar.style.display = 'flex';
     });
+
+    // 顶部汇总条
+    const summaryWrap = document.getElementById('summary-bar-wrap');
+    if (d.overall_old != null || d.overall_new != null) {
+      let deltaHtml = '';
+      if (d.delta != null) {
+        const cls = d.delta > 0.05 ? 'delta-pos' : d.delta < -0.05 ? 'delta-neg' : 'delta-flat';
+        const sign = d.delta > 0 ? '+' : '';
+        deltaHtml = `<span class="${cls}">${sign}${d.delta.toFixed(2)} ${d.delta > 0.05 ? '↑ 提升' : d.delta < -0.05 ? '↓ 退步' : '≈ 持平'}</span>`;
+      }
+      summaryWrap.innerHTML = `
+        <div class="summary-bar">
+          <span style="font-weight:600;">📊 本轮综合均分</span>
+          <span>旧 Prompt：<strong>${d.overall_old != null ? d.overall_old.toFixed(2) : '—'}</strong></span>
+          <span>→</span>
+          <span>新 Prompt：<strong>${d.overall_new != null ? d.overall_new.toFixed(2) : '—'}</strong></span>
+          ${deltaHtml ? `<span style="margin-left:4px;">${deltaHtml}</span>` : ''}
+          <span style="flex:1"></span>
+          <span style="font-size:11px;color:var(--muted);">（满分 5.0，LLM-as-Judge 评分）</span>
+        </div>`;
+    }
   } catch (e) {
     results.innerHTML += `<div style="color:var(--danger);font-size:13px;margin-top:12px;">❌ ${e.message}</div>`;
     // 清空 loading 状态
