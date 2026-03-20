@@ -363,9 +363,14 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    result = run_optimizer(
-        min_samples=args.min_samples,
-        days=args.days,
-        dry_run=args.dry_run,
-    )
-    sys.exit(0 if result["total_low_score"] == 0 or result["candidates_written"] >= 0 else 1)
+    try:
+        result = run_optimizer(
+            min_samples=args.min_samples,
+            days=args.days,
+            dry_run=args.dry_run,
+        )
+    except Exception:
+        logging.exception("Prompt optimizer 执行异常")
+        sys.exit(1)
+    # 按约定：0 = 正常完成（有低分记录），1 = 无低分记录或执行异常
+    sys.exit(1 if result["total_low_score"] == 0 else 0)
