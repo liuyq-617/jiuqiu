@@ -42,9 +42,10 @@
   - 将问答对 + 评价存入数据库
   - 支持用户补充文字反馈
 
-- [ ] **LLM-as-Judge 自动评分**
+- [x] **LLM-as-Judge 自动评分**
   - 用 GPT-4o 评估回答质量（相关性/完整性/准确性）
-  - 与人工评分对比，校准评分标准
+  - 每次问答结束后自动触发（`/api/chat` 和流式接口均已接入）
+  - 用户提交反馈后幂等跳过（已评过则不重复计费）
 
 - [ ] **基准测试集**
   - 维护标准 Q&A 测试集（50-100 条）
@@ -89,22 +90,22 @@
 **目标**: 将 LLM-as-Judge 分数转化为可执行的 Prompt 改进行动
 
 #### 3.5.1 Prompt 自动优化闭环
-- [ ] **低分样本分析脚本** `scripts/prompt_optimizer.py`
+- [x] **低分样本分析脚本** `scripts/prompt_optimizer.py`
   - 从 `feedback.db` 提取近 7 天平均分 < 3.5 的样本，按路由类型分组（ranking / evaluation / aggregate / metadata_filter / semantic）
   - 调用 Meta-LLM 分析共性缺陷，生成候选 Prompt 改进建议
   - 写入 `prompt_candidates` 表（status=pending），待人工审核后上线
 
-- [ ] **`prompt_candidates` 数据表**（在 `feedback.db` 中新增）
+- [x] **`prompt_candidates` 数据表**（在 `feedback.db` 中新增）
   - 字段：`route` / `suggestion` / `sample_count` / `status` / `avg_score_before` / `avg_score_after`
   - status 流转：`pending` → `approved` / `rejected`
 
-- [ ] **`rag.py` 热加载已审核 Prompt**
+- [x] **`rag.py` 热加载已审核 Prompt**
   - `_load_active_prompt()`：优先读取 `prompt_candidates` 表中最新 approved 记录
-  - 无审核记录时降级使用默认 `SYSTEM_PROMPT`
+  - 60s 缓存，无需重启服务；无审核记录时降级使用默认 `SYSTEM_PROMPT`
 
-- [ ] **每日定时触发**（`main.py` lifespan 后台线程）
-  - 凌晨 03:00 自动运行 `prompt_optimizer.py --min-samples 5`
-  - 依赖：`pip install schedule`
+- [x] **每日定时触发**（`main.py` lifespan 后台线程）
+  - 凌晨 03:00 自动运行 `run_optimizer(min_samples=5)`
+  - API：`GET /api/prompt-candidates`、`POST /…/approve`、`POST /…/reject`
 
 **实现文件**: `scripts/prompt_optimizer.py`（新增）、`app/rag.py`、`app/feedback.py`、`app/main.py`
 
