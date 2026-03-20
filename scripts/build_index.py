@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
 一键构建知识库索引脚本
-用法：python scripts/build_index.py
+用法：
+  python scripts/build_index.py           # 若集合已有数据则跳过（启动安全）
+  python scripts/build_index.py --force   # 强制删除旧集合并全量重建
 """
 import sys
+import argparse
 from pathlib import Path
 
 # 将 crm_kb 加入路径
@@ -14,6 +17,9 @@ from app.vector_store import build_index, disconnect_milvus
 from app.config import DATA_DIR, BASE_DIR
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--force", action="store_true", help="强制删除旧集合并全量重建")
+    args = parser.parse_args()
     print("=" * 55)
     print("  CRM 知识库索引构建工具")
     print("=" * 55)
@@ -42,7 +48,7 @@ def main():
 
     print(f"\n[步骤 2/3] 向量化并写入 Milvus...")
     try:
-        count = build_index(chunks)
+        count = build_index(chunks, force=args.force)
     except ConnectionError as e:
         print(f"\n[错误] {e}")
         print("  请先启动 Milvus：docker compose up -d")

@@ -328,8 +328,10 @@ async def chat_stream(req: ChatRequest):
                         tokens.append(chunk.get("content", ""))
                     elif ctype == "sources":
                         sources = chunk.get("sources", [])
-                except Exception:
-                    pass
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[chat_stream] JSON 解析失败: {e}, data: {data_str[:100]}")
+                except Exception as e:
+                    logger.error(f"[chat_stream] 处理 chunk 失败: {e}", exc_info=True)
             yield raw
 
         # 所有 chunk 发完后，保存到 DB 并推送 answer_id
@@ -616,7 +618,11 @@ async def get_chunk_strategy(req: ChunkStrategyRequest):
                                     break
                                 try:
                                     chunk = json.loads(data_str)
-                                except Exception:
+                                except json.JSONDecodeError as e:
+                                    logger.warning(f"[upload_ai_assistant] JSON 解析失败: {e}, data: {data_str[:100]}")
+                                    continue
+                                except Exception as e:
+                                    logger.error(f"[upload_ai_assistant] 处理 chunk 失败: {e}", exc_info=True)
                                     continue
                                 token = None
                                 if CHAT_API_MODE == "responses":
@@ -634,7 +640,8 @@ async def get_chunk_strategy(req: ChunkStrategyRequest):
 
                     try:
                         suggestion_json = json.loads(collected.strip())
-                    except Exception:
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[upload_ai_assistant] AI 返回非 JSON 格式: {e}, 使用默认值")
                         suggestion_json = {
                             "pattern": r"\n---\n",
                             "description": collected,
@@ -947,7 +954,11 @@ company: 客户[：:]\\s*(.+?)(?:\\\\n|$)
                             break
                         try:
                             chunk = json.loads(data_str)
-                        except Exception:
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"[upload_ai_assistant_stream] JSON 解析失败: {e}, data: {data_str[:100]}")
+                            continue
+                        except Exception as e:
+                            logger.error(f"[upload_ai_assistant_stream] 处理 chunk 失败: {e}", exc_info=True)
                             continue
                         token = None
                         if CHAT_API_MODE == "responses":
