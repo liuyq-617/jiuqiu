@@ -42,6 +42,7 @@ from app.vector_store import connect_milvus, ensure_collection, get_aggregate_st
 from app.document_loader import load_and_split, process_uploaded_file
 from app.feishu_bot import start_ws_client
 from app.feedback import init_db, save_qa, save_thumbs, save_manual_scores, trigger_judge, get_stats as get_feedback_stats
+from app.advanced_rag import _init_jieba
 
 
 # ========== 应用生命周期 ==========
@@ -67,6 +68,8 @@ async def lifespan(app: FastAPI):
     init_db()
     start_ws_client()
     _cleanup_old_temp_files()
+    # 预热 jieba 分词器（首次加载词典约 0.5s，避免第一次检索时卡顿）
+    _init_jieba()
     yield
 
 # ========== OpenAPI Tags ==========

@@ -22,11 +22,13 @@
   - 检索到子块时自动拼合完整父文档
   - 保留更丰富的上下文信息
 
-- [ ] **BM25 中文分词优化**（`app/advanced_rag.py` `_bm25_scores`）
-  - 当前：按单字拆分（`"客户拜访"` → `["客","户","拜","访"]`），关键词匹配精度有限
-  - 目标：引入 `jieba` 按词语拆分（`"客户拜访"` → `["客户","拜访"]`），提升 BM25 精确匹配效果
-  - 实现：`pip install jieba`，替换 `_bm25_scores` 内 `tokenize` 函数
-  - 注意：jieba 首次加载有约 1s 冷启动，建议在服务启动时预热
+- [x] **BM25 中文分词优化**（`app/advanced_rag.py` `_bm25_scores`）
+  - ~~当前：按单字拆分~~，已升级为 `jieba` 词级分词
+  - 停用词过滤（118词）：通用虚词 + 时间泛化词（最近/上周…）+ CRM高频词（客户/记录…）
+  - TDengine 领域词典（62条）：超级表、子表、taosKeeper、taosAdapter、集群部署等专有术语，防止被拆碎
+  - 服务启动时预热（`main.py` lifespan），避免首次检索卡顿
+  - 降级兜底：jieba 未安装时自动回退为单字分词，不影响主流程
+  - 依赖：`jieba>=0.42.1`（已加入 `requirements.txt`）
 
 **实现文件**: `app/advanced_rag.py`（已有）、`app/rag.py`、`app/config.py`
 

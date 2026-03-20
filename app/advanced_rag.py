@@ -170,10 +170,128 @@ def rewrite_query(question: str, n: int = ADVANCED_RAG_REWRITE_N) -> List[str]:
 # 2. 混合检索：多查询向量搜索 + BM25 重打分 (RRF 融合)
 # ══════════════════════════════════════════════
 
+# ---------- 中文分词器（jieba + 停用词 + 领域词典）----------
+
+# 停用词表：对 BM25 无区分度的高频词
+_STOP_WORDS: set[str] = {
+    # 通用虚词
+    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",
+    "一", "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会",
+    "着", "没有", "看", "好", "自己", "这", "那", "里", "后", "对",
+    "来", "他", "她", "它", "我们", "你们", "他们", "这个", "那个",
+    "什么", "怎么", "为什么", "因为", "所以", "但是", "如果", "虽然",
+    "已经", "可以", "应该", "需要", "一些", "更多", "相关", "目前",
+    "通过", "进行", "方面", "情况", "问题", "工作", "系统", "使用",
+    "等", "等等", "其他", "以及", "并且", "或者", "然后", "同时",
+    # 疑问词 / 量词（只表示提问意图，无文档区分度）
+    "哪些", "哪个", "哪位", "所有", "所有的", "全部", "每个", "各个",
+    # 极度泛化的时间副词（几乎每篇文档都有，IDF 趋近 0）
+    # ⚠️ 具体时间段词（上周/本周/上月/今天…）不在此列，保留以匹配文档时间信息
+    "最近", "近期", "当前", "现在", "目前",
+    # CRM 场景泛化词（在所有文档中高频出现，区分度低）
+    "客户", "负责人", "活动", "记录", "跟进", "沟通", "拜访", "会议",
+    "邮件", "电话", "反馈", "回复", "确认", "了解", "介绍", "讨论",
+    "合作", "项目", "方案", "计划", "进展", "情况", "状态", "更新",
+}
+
+# TDengine / 时序数据库领域词典（确保 jieba 不会把专有名词拆碎）
+_TDENGINE_TERMS: list[str] = [
+    # 产品与品牌
+    "TDengine", "涛思数据", "TAOS", "taosdata",
+    # 核心概念
+    "超级表", "子表", "时序数据库", "时间序列数据库", "TSDB",
+    "时序数据", "时间线", "数据接入", "数据订阅", "流计算",
+    "连续查询", "降采样", "插值", "数据压缩", "存储引擎",
+    # 功能模块
+    "taosKeeper", "taosExplorer", "taosAdapter", "taosBenchmark",
+    "TDinsight", "数据接入框架", "缓存功能", "消息队列",
+    # 接口协议
+    "RESTful接口", "WebSocket接口", "JDBC连接器", "ODBC连接器",
+    "Python连接器", "Go连接器", "Rust连接器", "C连接器",
+    # 部署架构
+    "集群部署", "单节点", "多副本", "数据分片", "vnode", "mnode",
+    "dnode", "qnode", "snode",
+    # 竞品（对话中常提及）
+    "InfluxDB", "TimescaleDB", "OpenTSDB", "Prometheus", "IoTDB",
+    "ClickHouse", "Druid", "Pinot",
+    # 行业场景
+    "工业物联网", "智能电网", "车联网", "金融行情", "IT运维",
+    "边缘计算", "数字孪生", "SCADA", "PLC", "传感器数据",
+]
+
+# jieba 默认词典缺失的时间词（提升为模块级常量，与其他词表并列维护）
+_TIME_WORDS: list[str] = [
+    "上月", "上季度", "下季度", "本季度",
+    "上半年", "下半年", "前天", "大前天",
+    "上上周", "上上月", "上个月", "这个月",
+    "近一周", "近一月", "近三月", "近半年",
+]
+
+_jieba_initialized = False
+
+
+def _init_jieba() -> None:
+    """首次调用时初始化 jieba：加载用户词典，预热分词器。"""
+    global _jieba_initialized
+    if _jieba_initialized:
+        return
+    try:
+        import jieba  # type: ignore
+
+        # 注册领域词典（权重高，词性 n=名词）
+        for term in _TDENGINE_TERMS:
+            jieba.add_word(term, freq=10000, tag="n")
+
+        # 补充 jieba 默认词典缺失的时间词（防止被拆成单字）
+        for w in _TIME_WORDS:
+            jieba.add_word(w, freq=10000, tag="t")  # t = 时间词
+
+        # 静默模式，不打印加载日志
+        jieba.setLogLevel(logging.WARNING)
+
+        # 预热（首次分词会触发词典加载，约 0.5s）
+        jieba.lcut("初始化预热")
+        logger.info("[advanced_rag] jieba 分词器初始化完成，已加载 %d 条领域术语", len(_TDENGINE_TERMS))
+    except ImportError:
+        logger.warning("[advanced_rag] jieba 未安装，将降级为单字分词")
+    finally:
+        # 无论成功与否均标记已尝试，避免 jieba 缺失时每次调用都重试并刷日志
+        _jieba_initialized = True
+
+
+def _tokenize(s: str) -> List[str]:
+    """
+    中文分词，优先使用 jieba 词级切分，并过滤停用词和单字符 token。
+    降级策略：jieba 未安装 → 按字拆分（行为与旧版相同）。
+    """
+    # 轻度预处理：仅去除隐藏控制字符（与 rag.py 保持一致）和多余空白
+    # ⚠️ 不过滤数字和标点，保留版本号（如 TDengine 3.0）交由 jieba 处理
+    cleaned = re.sub(r'[\u200b-\u200f\ufeff]', '', s)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    _init_jieba()
+    try:
+        import jieba  # type: ignore
+        tokens = jieba.lcut(cleaned, cut_all=False)
+    except ImportError:
+        # 降级：按字拆分（等同于旧版行为）
+        tokens = list(re.sub(r'\s+', '', cleaned))
+
+    # 过滤停用词 + 纯标点/空白 token + 单字符（保留全大写英文缩写如 SQL、API）
+    result = [
+        t for t in tokens
+        if t not in _STOP_WORDS
+        and not re.fullmatch(r'[\s\W]+', t)   # 纯标点或空白 token
+        and (len(t) > 1 or t.isupper())        # 单字符仅保留全大写英文缩写
+    ]
+    return result
+
+
 def _bm25_scores(query: str, texts: List[str]) -> List[float]:
     """
     对 texts 用 BM25 打分。
-    依赖 rank_bm25；若未安装则全部返回 0.0。
+    · 分词：jieba 词级切分 + 停用词过滤 + TDengine 领域词典
+    · 依赖 rank_bm25；若未安装则全部返回 0.0。
     """
     try:
         from rank_bm25 import BM25Okapi  # type: ignore
@@ -181,13 +299,15 @@ def _bm25_scores(query: str, texts: List[str]) -> List[float]:
         logger.warning("[advanced_rag] rank_bm25 未安装，BM25 降级为 0.0 分")
         return [0.0] * len(texts)
 
-    # 简单中文分词：按字拆分
-    def tokenize(s: str) -> List[str]:
-        return list(re.sub(r'\s+', '', s))
+    corpus = [_tokenize(t) for t in texts]
+    # 防止空语料导致 BM25 报错
+    corpus = [toks if toks else ["__empty__"] for toks in corpus]
 
-    corpus = [tokenize(t) for t in texts]
     bm25 = BM25Okapi(corpus)
-    q_tokens = tokenize(query)
+    q_tokens = _tokenize(query)
+    if not q_tokens:
+        return [0.0] * len(texts)
+
     raw = bm25.get_scores(q_tokens)
     # 归一化到 [0, 1]
     max_score = max(raw) if max(raw) > 0 else 1.0
